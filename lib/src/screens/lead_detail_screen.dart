@@ -18,17 +18,31 @@ class LeadDetailScreen extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final lead = ref
-        .watch(leadsProvider)
-        .firstWhere((item) => item.id == leadId);
+    final leads = ref.watch(leadsProvider);
+    final lead = leads.firstWhere(
+      (item) => item.id == leadId,
+      orElse: () => leads.first,
+    );
 
     return LpScreen(
       title: 'Lead Detail',
       trailing: LpPill(
         label: lead.temperature.name,
-        foreground: AppColors.alizarin,
-        background: AppColors.redSurface,
-        border: AppColors.redBorder,
+        foreground: switch (lead.temperature) {
+          LeadTemperature.hot => AppColors.alizarin,
+          LeadTemperature.warm => AppColors.tahitiGold,
+          LeadTemperature.cold => AppColors.schooner,
+        },
+        background: switch (lead.temperature) {
+          LeadTemperature.hot => AppColors.redSurface,
+          LeadTemperature.warm => AppColors.warningSurface,
+          LeadTemperature.cold => AppColors.pampas,
+        },
+        border: switch (lead.temperature) {
+          LeadTemperature.hot => AppColors.redBorder,
+          LeadTemperature.warm => AppColors.warningBorder,
+          LeadTemperature.cold => AppColors.westar,
+        },
       ),
       bottom: BottomActionBar(
         children: [
@@ -95,7 +109,8 @@ class LeadDetailScreen extends ConsumerWidget {
   }
 
   String _relativeDay(DateTime date) {
-    final now = DateTime(2026, 6, 9);
+    final n = DateTime.now();
+    final now = DateTime(n.year, n.month, n.day);
     final days = now
         .difference(DateTime(date.year, date.month, date.day))
         .inDays;
@@ -126,7 +141,7 @@ class MemoryPanel extends StatelessWidget {
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
               decoration: BoxDecoration(
-                color: const Color(0xFFE8EDFF),
+                color: AppColors.ribbonSurface,
                 borderRadius: BorderRadius.circular(999),
               ),
               child: Text(
@@ -219,7 +234,7 @@ class CallHistoryPanel extends StatelessWidget {
             ),
           ),
           const Divider(height: 1),
-          for (final record in history)
+          for (var i = 0; i < history.length; i++)
             Column(
               children: [
                 Padding(
@@ -234,20 +249,20 @@ class CallHistoryPanel extends StatelessWidget {
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             Text(
-                              record.title,
+                              history[i].title,
                               style: AppText.body14.copyWith(
                                 fontWeight: FontWeight.w700,
                               ),
                             ),
                             Text(
-                              '${formatter.format(record.duration.inMinutes)}:${formatter.format(record.duration.inSeconds.remainder(60))}',
+                              '${formatter.format(history[i].duration.inMinutes)}:${formatter.format(history[i].duration.inSeconds.remainder(60))}',
                               style: AppText.mono(size: 11.5),
                             ),
                           ],
                         ),
                       ),
                       LpPill(
-                        label: '${record.score} pts',
+                        label: '${history[i].score} pts',
                         foreground: AppColors.salem,
                         background: AppColors.white,
                         border: AppColors.iceCold,
@@ -260,7 +275,7 @@ class CallHistoryPanel extends StatelessWidget {
                     ],
                   ),
                 ),
-                if (record != history.last) const Divider(height: 1),
+                if (i < history.length - 1) const Divider(height: 1),
               ],
             ),
         ],

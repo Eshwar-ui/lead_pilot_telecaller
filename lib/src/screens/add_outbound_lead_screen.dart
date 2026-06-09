@@ -42,7 +42,7 @@ class AddOutboundLeadScreen extends ConsumerWidget {
                   width: 38,
                   height: 4,
                   decoration: BoxDecoration(
-                    color: const Color(0xFFD1D5DB),
+                    color: AppColors.westar,
                     borderRadius: BorderRadius.circular(2),
                   ),
                 ),
@@ -55,7 +55,7 @@ class AddOutboundLeadScreen extends ConsumerWidget {
                       Text(
                         'Manually add a lead to your outbound list',
                         style: AppText.body14.copyWith(
-                          color: const Color(0xFF6B7280),
+                          color: AppColors.schooner,
                         ),
                       ),
                     ],
@@ -142,9 +142,9 @@ class AddOutboundLeadScreen extends ConsumerWidget {
                           height: 50,
                           padding: const EdgeInsets.symmetric(horizontal: 19),
                           decoration: BoxDecoration(
-                            color: const Color(0xFFF9FAFB),
+                            color: AppColors.pampas,
                             borderRadius: BorderRadius.circular(8),
-                            border: Border.all(color: const Color(0xFFE5E7EB)),
+                            border: Border.all(color: AppColors.westar),
                           ),
                           child: Row(
                             children: [
@@ -156,7 +156,7 @@ class AddOutboundLeadScreen extends ConsumerWidget {
                               ),
                               const Icon(
                                 Icons.keyboard_arrow_down,
-                                color: Color(0xFF6B7280),
+                                color: AppColors.schooner,
                               ),
                             ],
                           ),
@@ -170,10 +170,10 @@ class AddOutboundLeadScreen extends ConsumerWidget {
                           height: 120,
                           padding: const EdgeInsets.all(22),
                           decoration: BoxDecoration(
-                            color: const Color(0xFFF9FAFB),
+                            color: AppColors.pampas,
                             borderRadius: BorderRadius.circular(10),
                             border: Border.all(
-                              color: const Color(0xFFD1D5DB),
+                              color: AppColors.westar,
                               style: BorderStyle.solid,
                             ),
                           ),
@@ -183,7 +183,7 @@ class AddOutboundLeadScreen extends ConsumerWidget {
                               const Icon(
                                 Icons.upload,
                                 size: 28,
-                                color: Color(0xFF6B7280),
+                                color: AppColors.schooner,
                               ),
                               const AppGap.xs(),
                               Text(
@@ -196,7 +196,7 @@ class AddOutboundLeadScreen extends ConsumerWidget {
                               Text(
                                 '.mp3, .wav, .m4a, .ogg - max 100 MB',
                                 style: AppText.caption11.copyWith(
-                                  color: const Color(0xFF6B7280),
+                                  color: AppColors.schooner,
                                 ),
                                 textAlign: TextAlign.center,
                               ),

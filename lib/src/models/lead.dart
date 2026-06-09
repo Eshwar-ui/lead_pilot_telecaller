@@ -1,6 +1,17 @@
 enum LeadTemperature { hot, warm, cold }
 
-enum LeadSource { meta, referral, event, inbound, website }
+enum LeadSource { meta, referral, event, inbound, website, organic }
+
+extension LeadSourceX on LeadSource {
+  String get displayName => switch (this) {
+    LeadSource.meta => 'Meta',
+    LeadSource.referral => 'Referral',
+    LeadSource.event => 'Event',
+    LeadSource.inbound => 'Inbound',
+    LeadSource.website => 'Website',
+    LeadSource.organic => 'Organic',
+  };
+}
 
 class Lead {
   const Lead({
@@ -19,6 +30,7 @@ class Lead {
     required this.objections,
     required this.checklist,
     required this.history,
+    this.propertyInterest,
   });
 
   final String id;
@@ -36,6 +48,8 @@ class Lead {
   final List<Objection> objections;
   final List<ChecklistItem> checklist;
   final List<CallRecord> history;
+  /// Short topic shown in the lead tile timestamp, e.g. "Luxury Villas Search".
+  final String? propertyInterest;
 }
 
 class MemoryInsight {
@@ -101,6 +115,62 @@ class CallRecord {
   final Duration duration;
   final int score;
 }
+
+// ─── Follow-up tasks ──────────────────────────────────────────────────────────
+
+enum FollowUpStatus { overdue, pending, done }
+
+class FollowUpTask {
+  const FollowUpTask({
+    required this.id,
+    required this.taskText,
+    required this.leadName,
+    this.phone,
+    this.leadId,
+    required this.status,
+    this.dueLabel,
+    this.dueToday = false,
+  });
+
+  final String id;
+  final String taskText;
+  final String leadName;
+  final String? phone;
+  /// ID of the associated [Lead] — used for navigation to lead detail.
+  final String? leadId;
+  final FollowUpStatus status;
+  final String? dueLabel;
+  /// True when this task is due on today's date (used for tab filtering).
+  final bool dueToday;
+}
+
+// ─── Global call log ──────────────────────────────────────────────────────────
+
+class CallLogEntry {
+  const CallLogEntry({
+    required this.id,
+    required this.leadName,
+    required this.phone,
+    required this.intent,
+    required this.source,
+    required this.duration,
+    required this.score,
+    required this.calledAt,
+    this.isInbound = false,
+  });
+
+  final String id;
+  final String leadName;
+  final String phone;
+  final String intent;
+  final LeadSource source;
+  final Duration duration;
+  final int score;
+  final DateTime calledAt;
+  final bool isInbound;
+}
+
+// ─── Outbound draft ───────────────────────────────────────────────────────────
 
 class OutboundLeadDraft {
   const OutboundLeadDraft({

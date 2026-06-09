@@ -48,6 +48,14 @@ abstract final class AppTheme {
 }
 
 abstract final class AppText {
+  static TextStyle get display24 => GoogleFonts.dmSans(
+    fontSize: 24,
+    height: 30 / 24,
+    fontWeight: FontWeight.w700,
+    letterSpacing: -0.48,
+    color: AppColors.zeus,
+  );
+
   static TextStyle get display16 => GoogleFonts.dmSans(
     fontSize: 16,
     height: 20 / 16,

@@ -223,6 +223,53 @@ class LpPill extends StatelessWidget {
   }
 }
 
+class LpMiniPill extends StatelessWidget {
+  const LpMiniPill({
+    super.key,
+    required this.label,
+    required this.foreground,
+    required this.background,
+    required this.border,
+    this.icon,
+  });
+
+  final String label;
+  final Color foreground;
+  final Color background;
+  final Color border;
+  final IconData? icon;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      decoration: BoxDecoration(
+        color: background,
+        borderRadius: BorderRadius.circular(AppRadius.xs),
+        border: Border.all(color: border),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (icon != null) ...[
+            Icon(icon!, size: 10, color: foreground),
+            const SizedBox(width: 4),
+          ],
+          Text(
+            label.toUpperCase(),
+            style: AppText.label11.copyWith(
+              color: foreground,
+              fontSize: 10,
+              letterSpacing: 0.6,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class LeadSummaryCard extends StatelessWidget {
   const LeadSummaryCard({super.key, required this.lead});
 
@@ -259,7 +306,7 @@ class LeadSummaryCard extends StatelessWidget {
                   runSpacing: 5,
                   children: [
                     LpPill(
-                      label: lead.source.name,
+                      label: lead.source.displayName,
                       foreground: AppColors.governorBay,
                       background: AppColors.zircon,
                       border: AppColors.periwinkle,
@@ -288,20 +335,27 @@ class ScoreRing extends StatelessWidget {
   final int score;
   final double size;
 
+  Color get _ringColor {
+    if (score >= 80) return AppColors.salem;
+    if (score >= 60) return AppColors.tahitiGold;
+    return AppColors.alizarin;
+  }
+
   @override
   Widget build(BuildContext context) {
+    final isNew = score <= 0;
     return SizedBox(
       width: size,
       height: size,
       child: CustomPaint(
-        painter: _ScoreRingPainter(score / 100),
+        painter: _ScoreRingPainter(isNew ? 0.0 : score / 100, isNew ? AppColors.tide : _ringColor),
         child: Center(
           child: Text(
-            '$score',
+            isNew ? 'New' : '$score',
             style: AppText.mono(
-              size: 22,
+              size: isNew ? size * 0.22 : size * 0.28,
               weight: FontWeight.w700,
-              color: AppColors.zeus,
+              color: isNew ? AppColors.tide : AppColors.zeus,
             ),
           ),
         ),
@@ -311,9 +365,10 @@ class ScoreRing extends StatelessWidget {
 }
 
 class _ScoreRingPainter extends CustomPainter {
-  _ScoreRingPainter(this.progress);
+  _ScoreRingPainter(this.progress, this.color);
 
   final double progress;
+  final Color color;
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -328,7 +383,7 @@ class _ScoreRingPainter extends CustomPainter {
       ..style = PaintingStyle.stroke
       ..strokeWidth = stroke
       ..strokeCap = StrokeCap.round
-      ..color = AppColors.salem;
+      ..color = color;
     canvas.drawArc(
       rect.deflate(stroke),
       -math.pi / 2,
@@ -347,7 +402,7 @@ class _ScoreRingPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(covariant _ScoreRingPainter oldDelegate) =>
-      oldDelegate.progress != progress;
+      oldDelegate.progress != progress || oldDelegate.color != color;
 }
 
 class MetricTile extends StatelessWidget {
@@ -607,7 +662,7 @@ class FormShell extends StatelessWidget {
             text: label,
             style: AppText.body14.copyWith(
               fontWeight: FontWeight.w700,
-              color: const Color(0xFF374151),
+              color: AppColors.merlin,
             ),
             children: [
               if (required)
@@ -619,7 +674,7 @@ class FormShell extends StatelessWidget {
                 TextSpan(
                   text: ' $optionalText',
                   style: AppText.body14.copyWith(
-                    color: const Color(0xFF6B7280),
+                    color: AppColors.schooner,
                   ),
                 ),
             ],
@@ -654,12 +709,12 @@ class LpTextField extends StatelessWidget {
       maxLines: maxLines,
       style: AppText.body14.copyWith(
         fontSize: 15,
-        color: const Color(0xFF111827),
+        color: AppColors.zeus,
       ),
       decoration: InputDecoration(
         isDense: true,
         filled: true,
-        fillColor: focused ? AppColors.white : const Color(0xFFF9FAFB),
+        fillColor: focused ? AppColors.white : AppColors.pampas,
         contentPadding: EdgeInsets.symmetric(
           horizontal: 15,
           vertical: maxLines == 1 ? 15 : 12,
@@ -667,7 +722,7 @@ class LpTextField extends StatelessWidget {
         enabledBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(8),
           borderSide: BorderSide(
-            color: focused ? AppColors.tahitiGold : const Color(0xFFE5E7EB),
+            color: focused ? AppColors.tahitiGold : AppColors.westar,
           ),
         ),
         focusedBorder: OutlineInputBorder(

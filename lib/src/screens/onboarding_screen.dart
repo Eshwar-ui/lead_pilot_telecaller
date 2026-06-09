@@ -1,70 +1,57 @@
 import 'package:flutter/material.dart';
-import 'package:flutter_svg/flutter_svg.dart';
+import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
-import 'package:flutter_app_utilities/flutter_app_utilities.dart';
 
 import '../theme/app_colors.dart';
+import '../theme/app_spacing.dart';
 import '../theme/app_theme.dart';
 import '../widgets/leadpilot_widgets.dart';
 
-class OnboardingScreen extends StatelessWidget {
+enum _Step { phone, otp }
+
+class OnboardingScreen extends StatefulWidget {
   const OnboardingScreen({super.key});
+
+  @override
+  State<OnboardingScreen> createState() => _OnboardingScreenState();
+}
+
+class _OnboardingScreenState extends State<OnboardingScreen> {
+  _Step _step = _Step.phone;
+
+  void _onSendOtp() => setState(() => _step = _Step.otp);
+  void _onVerify() => context.go('/home');
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: AppColors.springWood,
+      resizeToAvoidBottomInset: true,
       body: SafeArea(
         child: Padding(
-          padding: const EdgeInsets.all(24),
+          padding: const EdgeInsets.symmetric(horizontal: 24),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Spacer(),
-              Container(
-                width: 72,
-                height: 72,
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  color: AppColors.white,
-                  borderRadius: BorderRadius.circular(20),
-                  border: Border.all(color: AppColors.westar),
-                  boxShadow: AppShadows.card,
-                ),
-                child: SvgPicture.asset('assets/icons/leadpilot_mark.svg'),
-              ),
-              const AppGap.xl(),
-              Text(
-                'LeadPilot',
-                style: AppText.display20.copyWith(fontSize: 36, height: 1.05),
-              ),
-              const AppGap.xs(),
-              Text(
-                'AI-ready call preparation, lead memory, and telecaller workflows in one focused mobile shell.',
-                style: AppText.body14.copyWith(
-                  fontSize: 16,
-                  color: AppColors.schooner,
-                ),
-              ),
-              const AppGap.xl(),
-              _OnboardingRow(
-                icon: Icons.psychology_outlined,
-                text: 'Personalized pre-call scripts',
-              ),
-              _OnboardingRow(
-                icon: Icons.history,
-                text: 'Lead memory from prior calls',
-              ),
-              _OnboardingRow(
-                icon: Icons.check_circle_outline,
-                text: 'Checklist-driven follow through',
+              const SizedBox(height: AppSpacing.xl),
+              _BrandHeader(),
+              const SizedBox(height: AppSpacing.xl),
+              AnimatedSwitcher(
+                duration: const Duration(milliseconds: 200),
+                child: _step == _Step.phone
+                    ? _PhoneStep(key: const ValueKey('phone'))
+                    : _OtpStep(key: const ValueKey('otp')),
               ),
               const Spacer(),
+              _LanguageSelector(),
+              const SizedBox(height: AppSpacing.sm),
+              _ConsentText(),
+              const SizedBox(height: AppSpacing.md),
               PrimaryButton(
-                label: 'Open Queue',
-                icon: Icons.arrow_forward,
-                onTap: () => context.go('/home'),
+                label: _step == _Step.phone ? 'Send OTP' : 'Verify OTP',
+                onTap: _step == _Step.phone ? _onSendOtp : _onVerify,
               ),
+              const SizedBox(height: AppSpacing.xl),
             ],
           ),
         ),
@@ -73,25 +60,217 @@ class OnboardingScreen extends StatelessWidget {
   }
 }
 
-class _OnboardingRow extends StatelessWidget {
-  const _OnboardingRow({required this.icon, required this.text});
+class _BrandHeader extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        Container(
+          width: 46,
+          height: 46,
+          decoration: BoxDecoration(
+            color: AppColors.blueRibbon,
+            borderRadius: BorderRadius.circular(13),
+            boxShadow: AppShadows.blueAction,
+          ),
+          child: const Icon(Icons.phone_in_talk_rounded, color: Colors.white, size: 22),
+        ),
+        const SizedBox(width: 12),
+        Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('LeadPilot', style: AppText.display20.copyWith(fontSize: 26)),
+            Text(
+              'Your AI-powered calling partner',
+              style: AppText.caption11.copyWith(color: AppColors.schooner),
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+}
 
-  final IconData icon;
-  final String text;
+class _PhoneStep extends StatelessWidget {
+  const _PhoneStep({super.key});
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 12),
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          'Phone number',
+          style: AppText.body14.copyWith(fontWeight: FontWeight.w700, color: AppColors.zeus),
+        ),
+        const SizedBox(height: AppSpacing.xs),
+        _PhoneField(),
+      ],
+    );
+  }
+}
+
+class _PhoneField extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      height: 52,
+      decoration: BoxDecoration(
+        color: AppColors.white,
+        borderRadius: BorderRadius.circular(AppRadius.sm),
+        border: Border.all(color: AppColors.westar),
+        boxShadow: AppShadows.card,
+      ),
       child: Row(
         children: [
-          Icon(icon, color: AppColors.blueRibbon, size: 20),
-          const AppGap.sm(axis: Axis.horizontal),
-          Expanded(
-            child: Text(
-              text,
-              style: AppText.body14.copyWith(fontWeight: FontWeight.w600),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 14),
+            decoration: const BoxDecoration(
+              border: Border(right: BorderSide(color: AppColors.westar)),
             ),
+            child: Text(
+              '+91',
+              style: AppText.body14.copyWith(
+                fontWeight: FontWeight.w700,
+                color: AppColors.zeus,
+              ),
+            ),
+          ),
+          Expanded(
+            child: TextField(
+              keyboardType: TextInputType.phone,
+              inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+              style: AppText.mono(size: 15, color: AppColors.zeus),
+              decoration: InputDecoration(
+                hintText: '98765 43210',
+                hintStyle: AppText.mono(size: 15, color: AppColors.tide),
+                border: InputBorder.none,
+                contentPadding: const EdgeInsets.symmetric(horizontal: 14),
+                isDense: true,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _OtpStep extends StatelessWidget {
+  const _OtpStep({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text('Enter 6-digit OTP', style: AppText.display16),
+        const SizedBox(height: 4),
+        RichText(
+          text: TextSpan(
+            style: AppText.caption11.copyWith(color: AppColors.schooner),
+            children: [
+              const TextSpan(text: 'Sent to +91 986 54 210  '),
+              TextSpan(
+                text: 'Change',
+                style: AppText.caption11.copyWith(
+                  color: AppColors.blueRibbon,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: AppSpacing.md),
+        _OtpBoxRow(),
+        const SizedBox(height: AppSpacing.sm),
+        Text(
+          'Resend OTP in 28s',
+          style: AppText.caption11.copyWith(color: AppColors.schooner),
+        ),
+      ],
+    );
+  }
+}
+
+class _OtpBoxRow extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: List.generate(
+        6,
+        (i) => Expanded(
+          child: Padding(
+            padding: EdgeInsets.only(right: i < 5 ? 8 : 0),
+            child: Container(
+              height: 52,
+              decoration: BoxDecoration(
+                color: AppColors.white,
+                borderRadius: BorderRadius.circular(AppRadius.sm),
+                border: Border.all(
+                  color: i == 0 ? AppColors.blueRibbon : AppColors.westar,
+                  width: i == 0 ? 1.5 : 1,
+                ),
+                boxShadow: i == 0 ? AppShadows.card : null,
+              ),
+              child: const Center(child: SizedBox()),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _LanguageSelector extends StatelessWidget {
+  static const _scripts = ['తె', 'हि', 'N', 'த', 'ಕ'];
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        Text(
+          'Language',
+          style: AppText.caption11.copyWith(color: AppColors.schooner),
+        ),
+        const SizedBox(width: 10),
+        for (final s in _scripts)
+          Padding(
+            padding: const EdgeInsets.only(right: 6),
+            child: Container(
+              width: 34,
+              height: 34,
+              decoration: BoxDecoration(
+                color: AppColors.white,
+                borderRadius: BorderRadius.circular(AppRadius.xs),
+                border: Border.all(color: AppColors.westar),
+              ),
+              child: Center(
+                child: Text(s, style: AppText.body13.copyWith(fontSize: 14)),
+              ),
+            ),
+          ),
+      ],
+    );
+  }
+}
+
+class _ConsentText extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) {
+    return RichText(
+      text: TextSpan(
+        style: AppText.caption11.copyWith(color: AppColors.schooner),
+        children: const [
+          TextSpan(text: 'By continuing you agree to our '),
+          TextSpan(
+            text: 'Terms',
+            style: TextStyle(color: AppColors.blueRibbon, fontWeight: FontWeight.w600),
+          ),
+          TextSpan(text: ' & '),
+          TextSpan(
+            text: 'Privacy Policy',
+            style: TextStyle(color: AppColors.blueRibbon, fontWeight: FontWeight.w600),
           ),
         ],
       ),

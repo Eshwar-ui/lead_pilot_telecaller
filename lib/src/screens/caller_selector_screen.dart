@@ -36,7 +36,7 @@ class CallerSelectorScreen extends ConsumerWidget {
                 Text(
                   'complete action using',
                   style: AppText.body14.copyWith(
-                    color: Colors.black,
+                    color: AppColors.zeus,
                     fontSize: 20,
                     fontWeight: FontWeight.w700,
                   ),
@@ -90,7 +90,7 @@ class CallerSelectorScreen extends ConsumerWidget {
                         height: 20,
                         decoration: BoxDecoration(
                           shape: BoxShape.circle,
-                          border: Border.all(color: const Color(0xFFD1D5DB)),
+                          border: Border.all(color: AppColors.westar),
                           color: remember
                               ? AppColors.blueRibbon
                               : AppColors.white,
@@ -107,7 +107,7 @@ class CallerSelectorScreen extends ConsumerWidget {
                       Text(
                         'Remember My Choice',
                         style: AppText.body13.copyWith(
-                          color: Colors.black.withValues(alpha: 0.6),
+                          color: AppColors.merlin,
                         ),
                       ),
                     ],
@@ -121,7 +121,7 @@ class CallerSelectorScreen extends ConsumerWidget {
                   child: Text(
                     'Cancel',
                     style: AppText.body14.copyWith(
-                      color: const Color(0xFF0E6AF4),
+                      color: AppColors.blueRibbon,
                       fontSize: 20,
                       fontWeight: FontWeight.w600,
                     ),
@@ -161,7 +161,7 @@ class _CallerOption extends StatelessWidget {
             decoration: BoxDecoration(
               color: selected ? AppColors.blueRibbon : AppColors.white,
               borderRadius: BorderRadius.circular(8),
-              border: Border.all(color: const Color(0xFFDDDDDD)),
+              border: Border.all(color: AppColors.westar),
               boxShadow: selected ? AppShadows.blueAction : AppShadows.card,
             ),
             child: Icon(
@@ -171,7 +171,7 @@ class _CallerOption extends StatelessWidget {
             ),
           ),
           const AppGap.xs(),
-          Text(label, style: AppText.body13.copyWith(color: Colors.black)),
+          Text(label, style: AppText.body13.copyWith(color: AppColors.zeus)),
         ],
       ),
     );

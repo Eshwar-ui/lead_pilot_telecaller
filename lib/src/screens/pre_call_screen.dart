@@ -16,9 +16,11 @@ class PreCallScreen extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final lead = ref
-        .watch(leadsProvider)
-        .firstWhere((item) => item.id == leadId);
+    final leads = ref.watch(leadsProvider);
+    final lead = leads.firstWhere(
+      (item) => item.id == leadId,
+      orElse: () => leads.first,
+    );
 
     return LpScreen(
       title: 'Pre-Call',
@@ -62,9 +64,11 @@ class _OpeningScriptPanel extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final lead = ref
-        .watch(leadsProvider)
-        .firstWhere((item) => item.id == leadId);
+    final leads = ref.watch(leadsProvider);
+    final lead = leads.firstWhere(
+      (item) => item.id == leadId,
+      orElse: () => leads.first,
+    );
     return SectionPanel(
       title: 'AI Script',
       icon: Icons.edit_outlined,
@@ -89,17 +93,17 @@ class _OpeningScriptPanel extends ConsumerWidget {
           const AppGap.sm(),
           Text('KEY POINTS', style: AppText.label11),
           const AppGap.xs(),
-          for (final point in lead.script.keyPoints)
+          for (var i = 0; i < lead.script.keyPoints.length; i++)
             Padding(
               padding: const EdgeInsets.only(bottom: 6),
               child: Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    '1. ',
+                    '${i + 1}. ',
                     style: AppText.body13.copyWith(color: AppColors.schooner),
                   ),
-                  Expanded(child: Text(point, style: AppText.body13)),
+                  Expanded(child: Text(lead.script.keyPoints[i], style: AppText.body13)),
                 ],
               ),
             ),
@@ -116,9 +120,11 @@ class _StepsPanel extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final lead = ref
-        .watch(leadsProvider)
-        .firstWhere((item) => item.id == leadId);
+    final leads = ref.watch(leadsProvider);
+    final lead = leads.firstWhere(
+      (item) => item.id == leadId,
+      orElse: () => leads.first,
+    );
     return SectionPanel(
       title: 'AI Generated Script',
       icon: Icons.auto_awesome,
@@ -138,7 +144,7 @@ class _StepsPanel extends ConsumerWidget {
                     height: 30,
                     alignment: Alignment.center,
                     decoration: BoxDecoration(
-                      color: const Color(0xFFE8EDFF),
+                      color: AppColors.ribbonSurface,
                       borderRadius: BorderRadius.circular(5),
                     ),
                     child: Text(
@@ -184,9 +190,11 @@ class _ObjectionPanel extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final lead = ref
-        .watch(leadsProvider)
-        .firstWhere((item) => item.id == leadId);
+    final leads = ref.watch(leadsProvider);
+    final lead = leads.firstWhere(
+      (item) => item.id == leadId,
+      orElse: () => leads.first,
+    );
     return SectionPanel(
       title: 'Likely Objections',
       icon: Icons.lightbulb_outline,
@@ -231,9 +239,11 @@ class _ChecklistPanel extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final lead = ref
-        .watch(leadsProvider)
-        .firstWhere((item) => item.id == leadId);
+    final leads = ref.watch(leadsProvider);
+    final lead = leads.firstWhere(
+      (item) => item.id == leadId,
+      orElse: () => leads.first,
+    );
     final completed = ref.watch(checklistProvider)[lead.id] ?? <String>{};
 
     return LpCard(
@@ -310,7 +320,7 @@ class _ChecklistPanel extends ConsumerWidget {
                 Text(
                   'Add item...',
                   style: AppText.body13.copyWith(
-                    color: const Color(0xFF757575),
+                    color: AppColors.schooner,
                   ),
                 ),
               ],

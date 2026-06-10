@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
-import 'package:flutter_app_utilities/flutter_app_utilities.dart' hide AppSpacing, AppRadius;
+import 'package:flutter_app_utilities/flutter_app_utilities.dart'
+    hide AppSpacing, AppRadius;
 
 import '../theme/app_colors.dart';
 import '../theme/app_spacing.dart';
@@ -13,10 +14,15 @@ class ProfileScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: AppColors.springWood,
+      appBar: AppBar(),
       body: SafeArea(
         child: ListView(
           padding: const EdgeInsets.only(bottom: 100),
           children: [
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+              child: Text("Profile", style: AppText.display24),
+            ),
             // ── User card ─────────────────────────────────────────────────
             _UserCard(),
 
@@ -33,7 +39,11 @@ class ProfileScreen extends StatelessWidget {
                   Row(
                     children: const [
                       Expanded(
-                        child: MetricTile(label: 'Calls Made', value: '142', mono: true),
+                        child: MetricTile(
+                          label: 'Calls Made',
+                          value: '142',
+                          mono: true,
+                        ),
                       ),
                       SizedBox(width: 6),
                       Expanded(
@@ -305,10 +315,17 @@ class _LanguageRow extends StatelessWidget {
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
       child: Row(
         children: [
-          const Icon(Icons.language_outlined, size: 18, color: AppColors.schooner),
+          const Icon(
+            Icons.language_outlined,
+            size: 18,
+            color: AppColors.schooner,
+          ),
           const SizedBox(width: AppSpacing.sm),
           Expanded(
-            child: Text('Language', style: AppText.body14.copyWith(color: AppColors.zeus)),
+            child: Text(
+              'Language',
+              style: AppText.body14.copyWith(color: AppColors.zeus),
+            ),
           ),
           for (var i = 0; i < _scripts.length; i++)
             Padding(
@@ -330,8 +347,7 @@ class _LanguageRow extends StatelessWidget {
                     style: AppText.body13.copyWith(
                       fontSize: 12,
                       color: i == 0 ? AppColors.blueRibbon : AppColors.merlin,
-                      fontWeight:
-                          i == 0 ? FontWeight.w700 : FontWeight.w400,
+                      fontWeight: i == 0 ? FontWeight.w700 : FontWeight.w400,
                     ),
                   ),
                 ),

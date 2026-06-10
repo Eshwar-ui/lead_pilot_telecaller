@@ -1,9 +1,13 @@
+import 'dart:ui';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
-import 'package:flutter_app_utilities/flutter_app_utilities.dart' hide AppSpacing, AppRadius;
+import 'package:flutter_app_utilities/flutter_app_utilities.dart'
+    hide AppSpacing, AppRadius;
 
 import '../models/lead.dart';
+import '../services/call_actions.dart';
 import '../state/providers.dart';
 import '../theme/app_colors.dart';
 import '../theme/app_spacing.dart';
@@ -23,10 +27,15 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   static const _filters = ['All', 'High Intent', 'New', 'Follow-up', 'Cold'];
 
   List<Lead> _applyFilter(List<Lead> all) => switch (_filter) {
-    'High Intent' => all.where((l) => l.intent.toLowerCase().contains('high')).toList(),
+    'High Intent' =>
+      all.where((l) => l.intent.toLowerCase().contains('high')).toList(),
     'New' => all.where((l) => l.score <= 0).toList(),
-    'Follow-up' => all.where((l) => l.checklist.any((i) => !i.completed)).toList(),
-    'Cold' => all.where((l) => l.score < 40 || l.intent.toLowerCase().contains('cold')).toList(),
+    'Follow-up' =>
+      all.where((l) => l.checklist.any((i) => !i.completed)).toList(),
+    'Cold' =>
+      all
+          .where((l) => l.score < 40 || l.intent.toLowerCase().contains('cold'))
+          .toList(),
     _ => all,
   };
 
@@ -463,12 +472,15 @@ class _LeadTile extends ConsumerWidget {
             Positioned(
               right: -20,
               top: -40,
-              child: Container(
-                width: 140,
-                height: 140,
-                decoration: const BoxDecoration(
-                  color: Color(0x121E4AFF),
-                  shape: BoxShape.circle,
+              child: ImageFiltered(
+                imageFilter: ImageFilter.blur(sigmaX: 20, sigmaY: 20),
+                child: Container(
+                  width: 140,
+                  height: 140,
+                  decoration: const BoxDecoration(
+                    color: Color(0x121E4AFF),
+                    shape: BoxShape.circle,
+                  ),
                 ),
               ),
             ),
@@ -561,7 +573,7 @@ class _LeadTile extends ConsumerWidget {
                   // Call button — taps go directly to caller selector
                   GestureDetector(
                     behavior: HitTestBehavior.opaque,
-                    onTap: () => context.push('/caller-selector/${lead.id}'),
+                    onTap: () => _startQuickCall(context),
                     child: Container(
                       width: 40,
                       height: 40,
@@ -577,7 +589,11 @@ class _LeadTile extends ConsumerWidget {
                         ],
                       ),
                       child: const Center(
-                        child: Icon(Icons.call, size: 16, color: AppColors.white),
+                        child: Icon(
+                          Icons.call,
+                          size: 16,
+                          color: AppColors.white,
+                        ),
                       ),
                     ),
                   ),
@@ -588,6 +604,34 @@ class _LeadTile extends ConsumerWidget {
         ),
       ),
     );
+  }
+
+  Future<void> _startQuickCall(BuildContext context) async {
+    final result = await startCallWithNotesBubble(
+      leadId: lead.id,
+      leadName: lead.name,
+      phoneNumber: lead.phone,
+    );
+    if (!context.mounted) return;
+
+    if (!result.overlayPermissionGranted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Allow display over other apps, then tap quick call again.',
+          ),
+        ),
+      );
+      return;
+    }
+
+    if (!result.launched) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('No calling app available on this device.'),
+        ),
+      );
+    }
   }
 
   String _timeStamp() {

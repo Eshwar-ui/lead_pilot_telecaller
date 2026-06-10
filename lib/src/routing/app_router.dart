@@ -2,7 +2,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../screens/add_outbound_lead_screen.dart';
-import '../screens/caller_selector_screen.dart';
 import '../screens/dialer_screen.dart';
 import '../screens/lead_detail_screen.dart';
 import '../screens/main_shell.dart';
@@ -18,10 +17,7 @@ final appRouterProvider = Provider<GoRouter>((ref) {
         path: '/onboarding',
         builder: (context, state) => const OnboardingScreen(),
       ),
-      GoRoute(
-        path: '/home',
-        builder: (context, state) => const MainShell(),
-      ),
+      GoRoute(path: '/home', builder: (context, state) => const MainShell()),
       GoRoute(
         path: '/leads/:id',
         builder: (context, state) =>
@@ -35,11 +31,6 @@ final appRouterProvider = Provider<GoRouter>((ref) {
       GoRoute(
         path: '/outbound/add',
         builder: (context, state) => const AddOutboundLeadScreen(),
-      ),
-      GoRoute(
-        path: '/caller-selector/:id',
-        builder: (context, state) =>
-            CallerSelectorScreen(leadId: state.pathParameters['id']!),
       ),
       GoRoute(
         path: '/dialer/:id',

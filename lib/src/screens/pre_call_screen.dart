@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:go_router/go_router.dart';
 import 'package:flutter_app_utilities/flutter_app_utilities.dart';
 
+import '../services/call_actions.dart';
 import '../state/providers.dart';
 import '../theme/app_colors.dart';
 import '../theme/app_theme.dart';
@@ -32,7 +32,33 @@ class PreCallScreen extends ConsumerWidget {
             child: PrimaryButton(
               label: 'Start Call',
               icon: Icons.phone_outlined,
-              onTap: () => context.push('/caller-selector/${lead.id}'),
+              onTap: () async {
+                final result = await startCallWithNotesBubble(
+                  leadId: lead.id,
+                  leadName: lead.name,
+                  phoneNumber: lead.phone,
+                );
+                if (!context.mounted) return;
+
+                if (!result.overlayPermissionGranted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text(
+                        'Allow display over other apps, then tap Start Call again.',
+                      ),
+                    ),
+                  );
+                  return;
+                }
+
+                if (!result.launched) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text('No calling app available on this device.'),
+                    ),
+                  );
+                }
+              },
             ),
           ),
         ],
@@ -103,7 +129,12 @@ class _OpeningScriptPanel extends ConsumerWidget {
                     '${i + 1}. ',
                     style: AppText.body13.copyWith(color: AppColors.schooner),
                   ),
-                  Expanded(child: Text(lead.script.keyPoints[i], style: AppText.body13)),
+                  Expanded(
+                    child: Text(
+                      lead.script.keyPoints[i],
+                      style: AppText.body13,
+                    ),
+                  ),
                 ],
               ),
             ),
@@ -319,9 +350,7 @@ class _ChecklistPanel extends ConsumerWidget {
                 const AppGap.xs(axis: Axis.horizontal),
                 Text(
                   'Add item...',
-                  style: AppText.body13.copyWith(
-                    color: AppColors.schooner,
-                  ),
+                  style: AppText.body13.copyWith(color: AppColors.schooner),
                 ),
               ],
             ),

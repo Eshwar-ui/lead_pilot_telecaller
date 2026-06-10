@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_svg/svg.dart';
 import 'package:go_router/go_router.dart';
 
 import '../theme/app_colors.dart';
@@ -31,9 +32,9 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 24),
           child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
+            crossAxisAlignment: .center,
             children: [
-              const SizedBox(height: AppSpacing.xl),
+              Spacer(),
               _BrandHeader(),
               const SizedBox(height: AppSpacing.xl),
               AnimatedSwitcher(
@@ -42,15 +43,17 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                     ? _PhoneStep(key: const ValueKey('phone'))
                     : _OtpStep(key: const ValueKey('otp')),
               ),
+              const SizedBox(height: AppSpacing.md),
+
+              PrimaryButton(
+                label: _step == _Step.phone ? 'Send OTP' : 'Verify OTP',
+                onTap: _step == _Step.phone ? _onSendOtp : _onVerify,
+              ),
               const Spacer(),
               _LanguageSelector(),
               const SizedBox(height: AppSpacing.sm),
               _ConsentText(),
               const SizedBox(height: AppSpacing.md),
-              PrimaryButton(
-                label: _step == _Step.phone ? 'Send OTP' : 'Verify OTP',
-                onTap: _step == _Step.phone ? _onSendOtp : _onVerify,
-              ),
               const SizedBox(height: AppSpacing.xl),
             ],
           ),
@@ -63,23 +66,31 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
 class _BrandHeader extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
-    return Row(
+    return Column(
+      crossAxisAlignment: .center,
       children: [
         Container(
-          width: 46,
-          height: 46,
+          width: 72,
+          height: 72,
           decoration: BoxDecoration(
             color: AppColors.blueRibbon,
             borderRadius: BorderRadius.circular(13),
             boxShadow: AppShadows.blueAction,
           ),
-          child: const Icon(Icons.phone_in_talk_rounded, color: Colors.white, size: 22),
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(20),
+            child: Image.asset(
+              height: 72,
+              "assets/images/logo.png",
+              fit: BoxFit.cover,
+            ),
+          ),
         ),
-        const SizedBox(width: 12),
+        const SizedBox(width: 100),
         Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
+          crossAxisAlignment: CrossAxisAlignment.center,
           children: [
-            Text('LeadPilot', style: AppText.display20.copyWith(fontSize: 26)),
+            Text('LeadPilot', style: AppText.display20.copyWith(fontSize: 28)),
             Text(
               'Your AI-powered calling partner',
               style: AppText.caption11.copyWith(color: AppColors.schooner),
@@ -101,7 +112,10 @@ class _PhoneStep extends StatelessWidget {
       children: [
         Text(
           'Phone number',
-          style: AppText.body14.copyWith(fontWeight: FontWeight.w700, color: AppColors.zeus),
+          style: AppText.body14.copyWith(
+            fontWeight: FontWeight.w700,
+            color: AppColors.zeus,
+          ),
         ),
         const SizedBox(height: AppSpacing.xs),
         _PhoneField(),
@@ -228,6 +242,7 @@ class _LanguageSelector extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Row(
+      mainAxisAlignment: .center,
       children: [
         Text(
           'Language',
@@ -265,12 +280,18 @@ class _ConsentText extends StatelessWidget {
           TextSpan(text: 'By continuing you agree to our '),
           TextSpan(
             text: 'Terms',
-            style: TextStyle(color: AppColors.blueRibbon, fontWeight: FontWeight.w600),
+            style: TextStyle(
+              color: AppColors.blueRibbon,
+              fontWeight: FontWeight.w600,
+            ),
           ),
           TextSpan(text: ' & '),
           TextSpan(
             text: 'Privacy Policy',
-            style: TextStyle(color: AppColors.blueRibbon, fontWeight: FontWeight.w600),
+            style: TextStyle(
+              color: AppColors.blueRibbon,
+              fontWeight: FontWeight.w600,
+            ),
           ),
         ],
       ),

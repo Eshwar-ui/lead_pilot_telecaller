@@ -66,8 +66,8 @@ class LpTopBar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      height: 61,
-      padding: const EdgeInsets.fromLTRB(14, 8, 14, 13),
+      height: 75,
+      padding: const EdgeInsets.fromLTRB(14, 8, 14, 8),
       decoration: const BoxDecoration(
         color: AppColors.white,
         border: Border(bottom: BorderSide(color: AppColors.westar)),
@@ -348,7 +348,10 @@ class ScoreRing extends StatelessWidget {
       width: size,
       height: size,
       child: CustomPaint(
-        painter: _ScoreRingPainter(isNew ? 0.0 : score / 100, isNew ? AppColors.tide : _ringColor),
+        painter: _ScoreRingPainter(
+          isNew ? 0.0 : score / 100,
+          isNew ? AppColors.tide : _ringColor,
+        ),
         child: Center(
           child: Text(
             isNew ? 'New' : '$score',
@@ -673,9 +676,7 @@ class FormShell extends StatelessWidget {
               if (optionalText != null)
                 TextSpan(
                   text: ' $optionalText',
-                  style: AppText.body14.copyWith(
-                    color: AppColors.schooner,
-                  ),
+                  style: AppText.body14.copyWith(color: AppColors.schooner),
                 ),
             ],
           ),
@@ -707,10 +708,7 @@ class LpTextField extends StatelessWidget {
       initialValue: value,
       onChanged: onChanged,
       maxLines: maxLines,
-      style: AppText.body14.copyWith(
-        fontSize: 15,
-        color: AppColors.zeus,
-      ),
+      style: AppText.body14.copyWith(fontSize: 15, color: AppColors.zeus),
       decoration: InputDecoration(
         isDense: true,
         filled: true,

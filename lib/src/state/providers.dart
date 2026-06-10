@@ -4,8 +4,24 @@ import '../data/mock_leads.dart';
 import '../models/lead.dart';
 
 final leadsProvider = Provider<List<Lead>>((ref) => mockLeads);
-final followUpsProvider = Provider<List<FollowUpTask>>((ref) => mockFollowUpTasks);
+final followUpsProvider = Provider<List<FollowUpTask>>(
+  (ref) => mockFollowUpTasks,
+);
 final callLogProvider = Provider<List<CallLogEntry>>((ref) => mockCallLog);
+
+final callNotesProvider =
+    NotifierProvider<CallNotesController, Map<String, String>>(
+      CallNotesController.new,
+    );
+
+class CallNotesController extends Notifier<Map<String, String>> {
+  @override
+  Map<String, String> build() => {};
+
+  void setNotes(String leadId, String notes) {
+    state = {...state, leadId: notes};
+  }
+}
 
 final selectedLeadIdProvider =
     NotifierProvider<SelectedLeadIdController, String>(

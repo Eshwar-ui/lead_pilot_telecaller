@@ -15,9 +15,15 @@ class ApiEnvironment {
   final String baseUrl;
 
   // TODO(backend): replace placeholder hosts with the real ones.
+  //
+  // `dev` points at the local NestJS backend in /server (transcription).
+  //   * Physical device (the Xiaomi): dev machine LAN IP, phone on same Wi-Fi.
+  //     Currently set to this Mac's en0 IP (192.168.31.132). Re-check with
+  //     `ipconfig getifaddr en0` if your network changes.
+  //   * Android emulator instead: use http://10.0.2.2:3000 (host loopback).
   static const dev = ApiEnvironment(
     name: 'dev',
-    baseUrl: 'https://dev.api.leadpilot.example/v1',
+    baseUrl: 'http://192.168.31.132:3000',
   );
   static const staging = ApiEnvironment(
     name: 'staging',

@@ -362,11 +362,11 @@ class CallLogEntry {
 
 class OutboundLeadDraft {
   const OutboundLeadDraft({
-    this.name = 'Rakesh Sharma',
-    this.phone = '+91 98765 43210',
-    this.reason = 'Follow-up from event',
-    this.source = 'Event',
-    this.hasDuplicate = true,
+    this.name = '',
+    this.phone = '',
+    this.reason = '',
+    this.source = '',
+    this.hasDuplicate = false,
   });
 
   final String name;

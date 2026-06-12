@@ -75,7 +75,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  'Good morning, Ravi',
+                  'Good morning',
                   style: AppText.body13.copyWith(
                     color: AppColors.schooner,
                     fontWeight: FontWeight.w500,

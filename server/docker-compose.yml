@@ -1,0 +1,43 @@
+# Full local stack in Docker: Postgres + the NestJS backend.
+#   docker compose up -d --build
+#
+# Postgres is configured with user "kalyan" / db "leadpilot" / trust auth so the
+# DATABASE_URL in .env (postgresql://kalyan@localhost:5432/leadpilot) works for
+# host-based runs too. Inside the network the backend reaches it at host "db".
+
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: leadpilot-db
+    environment:
+      POSTGRES_USER: kalyan
+      POSTGRES_DB: leadpilot
+      POSTGRES_HOST_AUTH_METHOD: trust
+    ports:
+      # Host 5433 (5432 is used by another local project); container is 5432.
+      - "5433:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U kalyan -d leadpilot"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  backend:
+    build: .
+    container_name: leadpilot-backend
+    env_file: .env
+    environment:
+      # Override the .env localhost URL — inside the compose network the DB is "db".
+      DATABASE_URL: postgresql://kalyan@db:5432/leadpilot
+      PORT: 3000
+    ports:
+      - "3000:3000"
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  pgdata:

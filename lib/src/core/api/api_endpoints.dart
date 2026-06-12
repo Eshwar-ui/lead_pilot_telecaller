@@ -17,6 +17,10 @@ class ApiEndpoints {
   // Call logs
   static const String callLogs = '/call-logs';
 
+  // Call-recording speech-to-text (multipart audio upload → async job)
+  static const String transcribeCall = '/calls/transcribe';
+  static String transcribeJob(String jobId) => '/calls/transcribe/$jobId';
+
   // Per-lead call notes
   static String leadNotes(String leadId) => '/leads/$leadId/notes';
 

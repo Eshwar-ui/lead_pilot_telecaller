@@ -3,10 +3,21 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
 
+    <!-- Read the audio file the device dialer saves after a call (auto-record).
+         Android 11+ needs "All files access"; older devices use READ_EXTERNAL_STORAGE. -->
+    <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE" />
+    <uses-permission
+        android:name="android.permission.READ_EXTERNAL_STORAGE"
+        android:maxSdkVersion="32" />
+    <uses-permission android:name="android.permission.READ_MEDIA_AUDIO" />
+
     <application
         android:label="lead_pilot_telecaller"
         android:name="${applicationName}"
-        android:icon="@mipmap/ic_launcher">
+        android:icon="@mipmap/ic_launcher"
+        android:usesCleartextTraffic="true"><!-- DEV ONLY: allows http:// to the
+        local backend during the pilot. Remove this and serve the backend over
+        HTTPS before production. -->
         <activity
             android:name=".MainActivity"
             android:exported="true"

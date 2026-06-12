@@ -1,0 +1,27 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+/// One call recording sent for speech-to-text. Audio itself is discarded after
+/// processing — only the resulting transcript is retained.
+model CallTranscript {
+  id           String   @id @default(uuid())
+  leadId       String
+  status       String   @default("processing") // processing | done | failed
+  languageCode String?
+  transcript   String? // full transcript in the original language
+  transcriptEn String? // full transcript translated to English
+  entries      Json? // [{ speakerId, text, textEn, start, end }]
+  analysis     Json? // LLM scoring/summary: { summary, keyPoints, nextSteps, scores, breakdown, ... }
+  error        String?
+  recordedAt   DateTime?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([leadId])
+}

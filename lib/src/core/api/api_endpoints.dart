@@ -15,6 +15,9 @@
 ///   * `/api/calls/{id}/processing-status`   — Upload→Transcribe→Analyse→Done
 ///   * `/api/calls/{id}/lead-analysis`       — per-call AI analysis
 ///   * `/api/calls/{id}/transcript/translate`— "View English" toggle
+///   * `/api/attendance/check-in`            — clock in for today
+///   * `/api/attendance/check-out`           — clock out for today
+///   * `/api/attendance/today`                — today's attendance record
 class ApiEndpoints {
   const ApiEndpoints._();
 
@@ -51,4 +54,9 @@ class ApiEndpoints {
   // Transcript translation ("View English")
   static String translate(String callId) =>
       '/api/calls/$callId/transcript/translate';
+
+  // Attendance (clock in/out)
+  static const String attendanceCheckIn = '/api/attendance/check-in';
+  static const String attendanceCheckOut = '/api/attendance/check-out';
+  static const String attendanceToday = '/api/attendance/today';
 }

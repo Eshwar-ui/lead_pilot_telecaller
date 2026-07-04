@@ -751,19 +751,25 @@ class LpTextField extends StatelessWidget {
     required this.onChanged,
     this.focused = false,
     this.maxLines = 1,
+    this.obscureText = false,
+    this.keyboardType,
   });
 
   final String value;
   final ValueChanged<String> onChanged;
   final bool focused;
   final int maxLines;
+  final bool obscureText;
+  final TextInputType? keyboardType;
 
   @override
   Widget build(BuildContext context) {
     return TextFormField(
       initialValue: value,
       onChanged: onChanged,
-      maxLines: maxLines,
+      maxLines: obscureText ? 1 : maxLines,
+      obscureText: obscureText,
+      keyboardType: keyboardType,
       style: AppText.body14.copyWith(fontSize: 15, color: AppColors.zeus),
       decoration: InputDecoration(
         isDense: true,

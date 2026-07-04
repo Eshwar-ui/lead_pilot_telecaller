@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
@@ -5,20 +6,26 @@ import '../screens/add_outbound_lead_screen.dart';
 import '../screens/call_detail_screen.dart';
 import '../screens/dialer_screen.dart';
 import '../screens/lead_detail_screen.dart';
+import '../screens/login_screen.dart';
 import '../screens/main_shell.dart';
 import '../screens/notifications_screen.dart';
-import '../screens/onboarding_screen.dart';
 import '../screens/post_call_screen.dart';
 import '../screens/pre_call_screen.dart';
+import '../services/session_store.dart';
 
 final appRouterProvider = Provider<GoRouter>((ref) {
   return GoRouter(
-    initialLocation: '/onboarding',
+    initialLocation: '/login',
+    refreshListenable: _SessionRefreshListenable(ref),
+    redirect: (context, state) {
+      final loggedIn = ref.read(sessionProvider).isLoggedIn;
+      final onLoginPage = state.matchedLocation == '/login';
+      if (!loggedIn && !onLoginPage) return '/login';
+      if (loggedIn && onLoginPage) return '/home';
+      return null;
+    },
     routes: [
-      GoRoute(
-        path: '/onboarding',
-        builder: (context, state) => const OnboardingScreen(),
-      ),
+      GoRoute(path: '/login', builder: (context, state) => const LoginScreen()),
       GoRoute(path: '/home', builder: (context, state) => const MainShell()),
       GoRoute(
         path: '/leads/:id',
@@ -61,3 +68,12 @@ final appRouterProvider = Provider<GoRouter>((ref) {
     ],
   );
 });
+
+/// Bridges Riverpod's [sessionProvider] to GoRouter's [Listenable]-based
+/// refresh mechanism, so login/logout immediately re-run the redirect above
+/// instead of only taking effect on the next manual navigation.
+class _SessionRefreshListenable extends ChangeNotifier {
+  _SessionRefreshListenable(Ref ref) {
+    ref.listen(sessionProvider, (previous, next) => notifyListeners());
+  }
+}

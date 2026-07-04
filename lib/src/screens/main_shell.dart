@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_app_utilities/flutter_app_utilities.dart' hide AppSpacing;
 
+import '../services/permission_bootstrap.dart';
 import '../theme/app_colors.dart';
 import '../theme/app_theme.dart';
 import 'home_screen.dart';
@@ -24,6 +25,16 @@ class _MainShellState extends State<MainShell> {
     FollowUpsScreen(),
     ProfileScreen(),
   ];
+
+  @override
+  void initState() {
+    super.initState();
+    // Onboarding no longer runs before this screen, so request phone +
+    // notification access here instead, as soon as the dashboard opens.
+    WidgetsBinding.instance.addPostFrameCallback(
+      (_) => PermissionBootstrap.requestStartup(),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {

@@ -6,23 +6,35 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../core/api/api_client.dart';
 import '../core/api/api_config.dart';
+import '../core/api/api_exception.dart';
 import '../core/api/http_api_client.dart';
+import '../data/attendance_repository.dart';
 import '../data/lead_repository.dart';
 import '../data/mock_leads.dart';
+import '../models/attendance_record.dart';
 import '../models/lead.dart';
 import '../services/local_call_store.dart';
 import '../services/local_follow_up_store.dart';
 import '../services/local_lead_override_store.dart';
+import '../services/session_store.dart';
 
 // ─── Backend wiring ───────────────────────────────────────────────────────────
 
 /// The HTTP transport. Swap the implementation here (or override in tests)
-/// without touching call sites.
-final apiClientProvider = Provider<ApiClient>((ref) => HttpApiClient());
+/// without touching call sites. Reads the session's JWT fresh on every
+/// request so login/logout take effect immediately.
+final apiClientProvider = Provider<ApiClient>(
+  (ref) => HttpApiClient(getToken: () => ref.read(sessionProvider).token),
+);
 
 /// Maps the FastAPI "AI layer" responses into the app's domain models.
 final leadRepositoryProvider = Provider<LeadRepository>(
   (ref) => LeadRepository(ref.watch(apiClientProvider)),
+);
+
+/// Talks to the attendance (clock in/out) endpoints.
+final attendanceRepositoryProvider = Provider<AttendanceRepository>(
+  (ref) => AttendanceRepository(ref.watch(apiClientProvider)),
 );
 
 // ─── Leads (inbox) ────────────────────────────────────────────────────────────
@@ -405,4 +417,106 @@ class LeadStageController extends Notifier<Map<String, LeadStage>> {
   }
 
   LeadStage stageFor(String leadId) => state[leadId] ?? LeadStage.newLead;
+}
+
+// ─── Attendance (clock in/out) ────────────────────────────────────────────────
+
+/// UI state for the Profile screen's Attendance card: today's record plus
+/// in-flight/error flags for the check-in / check-out actions.
+class AttendanceState {
+  const AttendanceState({
+    this.record,
+    this.loading = false,
+    this.actionInProgress = false,
+    this.error,
+  });
+
+  /// Today's attendance record, or null until the first fetch resolves.
+  final AttendanceRecord? record;
+
+  /// True while the initial `today()` fetch is in flight.
+  final bool loading;
+
+  /// True while a check-in/check-out request is in flight.
+  final bool actionInProgress;
+
+  /// Last error message to surface via a snackbar, if any.
+  final String? error;
+
+  AttendanceState copyWith({
+    AttendanceRecord? record,
+    bool? loading,
+    bool? actionInProgress,
+    String? error,
+    bool clearError = false,
+  }) {
+    return AttendanceState(
+      record: record ?? this.record,
+      loading: loading ?? this.loading,
+      actionInProgress: actionInProgress ?? this.actionInProgress,
+      error: clearError ? null : (error ?? this.error),
+    );
+  }
+}
+
+/// Today's attendance record + check-in/check-out actions for the Profile
+/// screen's Attendance card.
+final attendanceProvider =
+    NotifierProvider<AttendanceController, AttendanceState>(
+  AttendanceController.new,
+);
+
+class AttendanceController extends Notifier<AttendanceState> {
+  @override
+  AttendanceState build() {
+    _load();
+    return const AttendanceState(loading: true);
+  }
+
+  Future<void> _load() async {
+    state = state.copyWith(loading: true, clearError: true);
+    try {
+      final record = await ref.read(attendanceRepositoryProvider).today();
+      state = state.copyWith(record: record, loading: false);
+    } on ApiException catch (e) {
+      state = state.copyWith(loading: false, error: e.message);
+    }
+  }
+
+  /// Re-fetch today's record (e.g. pull-to-refresh).
+  Future<void> refresh() => _load();
+
+  /// `POST /api/attendance/check-in`. A 409 (already checked in) is treated
+  /// as harmless — it just means another tap/device beat this one there, so
+  /// state is refreshed instead of surfacing a scary error.
+  Future<void> checkIn() async {
+    state = state.copyWith(actionInProgress: true, clearError: true);
+    try {
+      final record = await ref.read(attendanceRepositoryProvider).checkIn();
+      state = state.copyWith(record: record, actionInProgress: false);
+    } on ApiException catch (e) {
+      if (e.statusCode == 409) {
+        await _load();
+        return;
+      }
+      state = state.copyWith(actionInProgress: false, error: e.message);
+    }
+  }
+
+  /// `POST /api/attendance/check-out`. A 409 (already checked out) is
+  /// treated the same harmless way as [checkIn]'s race; a 404 (no check-in
+  /// yet today) is surfaced since that's a genuine usage error.
+  Future<void> checkOut() async {
+    state = state.copyWith(actionInProgress: true, clearError: true);
+    try {
+      final record = await ref.read(attendanceRepositoryProvider).checkOut();
+      state = state.copyWith(record: record, actionInProgress: false);
+    } on ApiException catch (e) {
+      if (e.statusCode == 409) {
+        await _load();
+        return;
+      }
+      state = state.copyWith(actionInProgress: false, error: e.message);
+    }
+  }
 }

@@ -1,4 +1,7 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- Required for the release APK to reach the backend API. Flutter only auto-adds
+         INTERNET to the debug/profile manifests, not release. -->
+    <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
     <!-- Detect call-end so the overlay can auto-return to the app -->
     <uses-permission android:name="android.permission.READ_PHONE_STATE" />

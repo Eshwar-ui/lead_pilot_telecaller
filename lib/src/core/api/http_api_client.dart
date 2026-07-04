@@ -15,9 +15,14 @@ import 'api_exception.dart';
 /// timeouts, non-2xx responses) to [ApiException] so callers never depend on
 /// the HTTP library.
 class HttpApiClient implements ApiClient {
-  HttpApiClient({http.Client? client}) : _client = client ?? http.Client();
+  HttpApiClient({http.Client? client, this.getToken}) : _client = client ?? http.Client();
 
   final http.Client _client;
+
+  /// Returns the current session's JWT, or null when logged out. Read fresh
+  /// on every request (not captured once) so login/logout during the app's
+  /// lifetime takes effect immediately — see `session_store.dart`.
+  final String? Function()? getToken;
 
   @override
   Future<dynamic> get(String path, {Map<String, dynamic>? query}) =>
@@ -48,6 +53,8 @@ class HttpApiClient implements ApiClient {
     final uri = ApiConfig.uri(path, query: query);
     final request = http.Request(method, uri)
       ..headers.addAll(ApiConfig.defaultHeaders);
+    final token = getToken?.call();
+    if (token != null) request.headers['Authorization'] = 'Bearer $token';
     if (body != null) request.body = jsonEncode(body);
 
     try {

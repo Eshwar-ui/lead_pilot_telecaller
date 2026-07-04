@@ -47,6 +47,7 @@ dependencies:
   shared_preferences: ^2.3.5
   flutter_local_notifications: ^18.0.1
   timezone: ^0.9.4
+  flutter_secure_storage: ^9.2.4
 
 dev_dependencies:
   flutter_test:

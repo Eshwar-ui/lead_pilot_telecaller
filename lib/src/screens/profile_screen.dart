@@ -4,7 +4,9 @@ import 'package:flutter_app_utilities/flutter_app_utilities.dart'
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../models/attendance_record.dart';
 import '../models/lead.dart';
+import '../services/session_store.dart';
 import '../services/user_profile_store.dart';
 import '../state/providers.dart';
 import '../theme/app_colors.dart';
@@ -52,6 +54,10 @@ class ProfileScreen extends ConsumerWidget {
                 padding: const EdgeInsets.only(top: 6, bottom: 100),
                 children: [
                   _UserCard(profile: profile),
+                  const SizedBox(height: AppSpacing.md),
+
+                  // ── Attendance (clock in/out) ─────────────────────────────
+                  const _AttendanceCard(),
                   const SizedBox(height: AppSpacing.md),
 
                   // ── Monthly stats (computed) ──────────────────────────────
@@ -180,7 +186,10 @@ class ProfileScreen extends ConsumerWidget {
                         label: 'Log out',
                         iconColor: AppColors.alizarin,
                         labelColor: AppColors.alizarin,
-                        onTap: () => context.go('/onboarding'),
+                        onTap: () async {
+                          await ref.read(sessionProvider.notifier).logout();
+                          if (context.mounted) context.go('/login');
+                        },
                       ),
                     ],
                   ),
@@ -255,6 +264,193 @@ class _UserCard extends ConsumerWidget {
           ),
         ],
       ),
+    );
+  }
+}
+
+// ─── Attendance card ────────────────────────────────────────────────────────
+
+class _AttendanceCard extends ConsumerWidget {
+  const _AttendanceCard();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final attendance = ref.watch(attendanceProvider);
+
+    ref.listen(attendanceProvider, (previous, next) {
+      if (next.error != null && next.error != previous?.error) {
+        ScaffoldMessenger.of(context)
+          ..clearSnackBars()
+          ..showSnackBar(SnackBar(content: Text(next.error!)));
+      }
+    });
+
+    return Container(
+      margin: const EdgeInsets.fromLTRB(16, 0, 16, 0),
+      padding: const EdgeInsets.all(18),
+      decoration: BoxDecoration(
+        color: AppColors.white,
+        borderRadius: BorderRadius.circular(AppRadius.xl),
+        border: Border.all(color: AppColors.westar),
+        boxShadow: AppShadows.card,
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Icon(Icons.access_time_filled,
+                  size: 18, color: AppColors.blueRibbon),
+              const SizedBox(width: AppSpacing.xs),
+              Text('ATTENDANCE', style: AppText.label11),
+            ],
+          ),
+          const SizedBox(height: AppSpacing.sm),
+          if (attendance.loading && attendance.record == null)
+            const Padding(
+              padding: EdgeInsets.symmetric(vertical: 8),
+              child: Center(
+                child: SizedBox(
+                  width: 20,
+                  height: 20,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                ),
+              ),
+            )
+          else
+            _AttendanceBody(
+              record: attendance.record,
+              busy: attendance.actionInProgress,
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+class _AttendanceBody extends ConsumerWidget {
+  const _AttendanceBody({required this.record, required this.busy});
+
+  final AttendanceRecord? record;
+  final bool busy;
+
+  String _formatTime(DateTime dt) {
+    final local = dt.toLocal();
+    final hour = local.hour % 12 == 0 ? 12 : local.hour % 12;
+    final minute = local.minute.toString().padLeft(2, '0');
+    final period = local.hour >= 12 ? 'PM' : 'AM';
+    return '$hour:$minute $period';
+  }
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final checkInAt = record?.checkInAt;
+    final checkOutAt = record?.checkOutAt;
+
+    // Not checked in yet today.
+    if (checkInAt == null) {
+      return PrimaryButton(
+        label: busy ? 'Checking in…' : 'Check In',
+        icon: busy ? null : Icons.login,
+        onTap: busy
+            ? null
+            : () => ref.read(attendanceProvider.notifier).checkIn(),
+      );
+    }
+
+    // Checked in, not yet checked out.
+    if (checkOutAt == null) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          _AttendanceTimeRow(
+            icon: Icons.login,
+            label: 'Checked in',
+            value: _formatTime(checkInAt),
+            valueColor: AppColors.salem,
+          ),
+          const SizedBox(height: AppSpacing.sm),
+          PrimaryButton(
+            label: busy ? 'Checking out…' : 'Check Out',
+            icon: busy ? null : Icons.logout,
+            color: AppColors.alizarin,
+            onTap: busy
+                ? null
+                : () => ref.read(attendanceProvider.notifier).checkOut(),
+          ),
+        ],
+      );
+    }
+
+    // Checked in and out — done for today.
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _AttendanceTimeRow(
+          icon: Icons.login,
+          label: 'Checked in',
+          value: _formatTime(checkInAt),
+          valueColor: AppColors.salem,
+        ),
+        const SizedBox(height: AppSpacing.xs),
+        _AttendanceTimeRow(
+          icon: Icons.logout,
+          label: 'Checked out',
+          value: _formatTime(checkOutAt),
+          valueColor: AppColors.alizarin,
+        ),
+        const SizedBox(height: AppSpacing.xs),
+        _AttendanceTimeRow(
+          icon: Icons.timelapse,
+          label: 'Hours worked',
+          value: record?.hoursWorked != null
+              ? '${record!.hoursWorked!.toStringAsFixed(1)} hrs'
+              : '—',
+          valueColor: AppColors.blueRibbon,
+        ),
+        const SizedBox(height: AppSpacing.xs),
+        Row(
+          children: [
+            const Icon(Icons.check_circle, size: 14, color: AppColors.salem),
+            const SizedBox(width: 6),
+            Text(
+              'All done for today',
+              style: AppText.caption11.copyWith(color: AppColors.schooner),
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+}
+
+class _AttendanceTimeRow extends StatelessWidget {
+  const _AttendanceTimeRow({
+    required this.icon,
+    required this.label,
+    required this.value,
+    required this.valueColor,
+  });
+
+  final IconData icon;
+  final String label;
+  final String value;
+  final Color valueColor;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        Icon(icon, size: 16, color: AppColors.schooner),
+        const SizedBox(width: AppSpacing.xs),
+        Expanded(
+          child: Text(label, style: AppText.body14.copyWith(color: AppColors.zeus)),
+        ),
+        Text(
+          value,
+          style: AppText.mono(size: 13, weight: FontWeight.w700, color: valueColor),
+        ),
+      ],
     );
   }
 }

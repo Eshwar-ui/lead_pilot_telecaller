@@ -180,7 +180,7 @@ class _AddOutboundLeadScreenState extends ConsumerState<AddOutboundLeadScreen> {
 
   Future<void> _saveAndCall() async {
     final key = await _createLead();
-    if (key != null && mounted) context.go('/leads/$key/pre-call');
+    if (key != null && mounted) context.go('/leads/$key');
   }
 
   void _toast(String msg) {

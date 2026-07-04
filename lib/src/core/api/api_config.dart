@@ -47,18 +47,19 @@ class ApiConfig {
   /// falling back to mock data only if the backend is unreachable.
   static const bool useMockData = false;
 
-  /// The active backend target. Now pointed at the deployed Render backend.
-  /// Swap back to [ApiEnvironment.dev] for local development against a
-  /// laptop-hosted FastAPI instance.
-  static const ApiEnvironment environment = ApiEnvironment.prod;
+  /// The active backend target. Pointed at a laptop-hosted FastAPI instance
+  /// for local development — swap to [ApiEnvironment.prod] before shipping,
+  /// once the deployed backend has this session's new code.
+  static const ApiEnvironment environment = ApiEnvironment.dev;
 
   static String get baseUrl => environment.baseUrl;
 
   /// Network timeout applied per request by the concrete client.
   static const Duration timeout = Duration(seconds: 20);
 
-  /// Headers attached to every request. Inject auth here once available, e.g.
-  /// `'Authorization': 'Bearer $token'`.
+  /// Headers attached to every request. `Authorization` is added separately
+  /// by [HttpApiClient] (see its `getToken` param / `session_store.dart`) —
+  /// not here, since it's per-session state, not a static default.
   static Map<String, String> get defaultHeaders => {
     'Content-Type': 'application/json',
     'Accept': 'application/json',

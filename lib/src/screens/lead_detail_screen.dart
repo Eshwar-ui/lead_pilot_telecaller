@@ -18,17 +18,37 @@ import '../widgets/schedule_call_sheet.dart';
 import '../widgets/upload_recording_sheet.dart';
 import 'call_detail_screen.dart';
 
-class LeadDetailScreen extends ConsumerWidget {
+class LeadDetailScreen extends ConsumerStatefulWidget {
   const LeadDetailScreen({super.key, required this.leadId});
 
   final String leadId;
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<LeadDetailScreen> createState() => _LeadDetailScreenState();
+}
+
+class _LeadDetailScreenState extends ConsumerState<LeadDetailScreen> {
+  @override
+  void initState() {
+    super.initState();
+    // The lead can arrive here as a *thin* inbox card (no memory bubble, call
+    // history, script or objections) — enrichment is otherwise only fired
+    // fire-and-forget from the Home tile tap, so reaching this screen any other
+    // way (post-call, follow-ups, call log, a deep link) would show empty
+    // panels. Fetch the full detail as soon as the screen opens; enrich() is
+    // idempotent and fail-soft, so a duplicate call from the Home tap is fine.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      ref.read(leadsProvider.notifier).enrich(widget.leadId);
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final leadId = widget.leadId;
     final leads = ref.watch(leadsProvider);
     final lead = leads.firstWhere(
       (item) => item.id == leadId,
-      orElse: () => leads.first,
+      orElse: () => leads.isEmpty ? Lead.empty() : leads.first,
     );
 
     // Merge any locally-recorded calls for this lead into the backend history.

@@ -4,7 +4,9 @@ import 'package:go_router/go_router.dart';
 import 'package:flutter_app_utilities/flutter_app_utilities.dart';
 
 import '../core/api/api_exception.dart';
+import '../services/local_call_store.dart';
 import '../services/session_store.dart';
+import '../services/user_profile_store.dart';
 import '../state/providers.dart';
 import '../theme/app_colors.dart';
 import '../theme/app_theme.dart';
@@ -49,6 +51,24 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
         token: map['access_token'] as String,
         user: map['user'] as Map<String, dynamic>,
       );
+      // Mirror of the invalidation on logout (see profile_screen.dart): the
+      // *previous* logout already invalidated these while the token was
+      // null, so their rebuild fetched with no auth and fell back to
+      // mock/empty state. Without invalidating again now that a real token
+      // exists, that stale state would sit there un-refreshed until the app
+      // is restarted — the "stale data after re-login" bug.
+      ref.invalidate(userProfileProvider);
+      ref.invalidate(orgProfileProvider);
+      ref.invalidate(leadsProvider);
+      ref.invalidate(leadsUsingFallbackProvider);
+      ref.invalidate(followUpsProvider);
+      ref.invalidate(localCallsProvider);
+      ref.invalidate(leadStageProvider);
+      ref.invalidate(checklistExtrasProvider);
+      ref.invalidate(callNotesProvider);
+      ref.invalidate(selectedLeadIdProvider);
+      ref.invalidate(telecallerScoreProvider);
+      ref.invalidate(attendanceProvider);
       if (!mounted) return;
       final user = map['user'] as Map<String, dynamic>;
       if (user['must_reset_password'] == true) {

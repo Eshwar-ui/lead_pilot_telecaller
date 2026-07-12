@@ -681,6 +681,7 @@ class LeadStageController extends Notifier<Map<String, LeadStage>> {
 class AttendanceState {
   const AttendanceState({
     this.record,
+    this.openPastShifts = const [],
     this.loading = false,
     this.actionInProgress = false,
     this.error,
@@ -688,6 +689,10 @@ class AttendanceState {
 
   /// Today's attendance record, or null until the first fetch resolves.
   final AttendanceRecord? record;
+
+  /// Prior-day shifts the telecaller never checked out of (forgotten), so the
+  /// Profile screen can prompt them to close each one.
+  final List<AttendanceRecord> openPastShifts;
 
   /// True while the initial `today()` fetch is in flight.
   final bool loading;
@@ -700,6 +705,7 @@ class AttendanceState {
 
   AttendanceState copyWith({
     AttendanceRecord? record,
+    List<AttendanceRecord>? openPastShifts,
     bool? loading,
     bool? actionInProgress,
     String? error,
@@ -707,6 +713,7 @@ class AttendanceState {
   }) {
     return AttendanceState(
       record: record ?? this.record,
+      openPastShifts: openPastShifts ?? this.openPastShifts,
       loading: loading ?? this.loading,
       actionInProgress: actionInProgress ?? this.actionInProgress,
       error: clearError ? null : (error ?? this.error),
@@ -737,8 +744,25 @@ class AttendanceController extends Notifier<AttendanceState> {
   Future<void> _load() async {
     state = state.copyWith(loading: true, clearError: true);
     try {
-      final record = await ref.read(attendanceRepositoryProvider).today();
-      state = state.copyWith(record: record, loading: false);
+      final repo = ref.read(attendanceRepositoryProvider);
+      final record = await repo.today();
+      // Prior-day shifts the telecaller never closed. Best-effort: an older
+      // backend without /mine must not break the card, so swallow its errors.
+      List<AttendanceRecord> openPast = const [];
+      try {
+        final mine = await repo.mine(days: 7);
+        openPast = mine
+            .where((r) =>
+                r.checkInAt != null && r.checkOutAt == null && r.id != record.id)
+            .toList();
+      } on ApiException {
+        openPast = const [];
+      }
+      state = state.copyWith(
+        record: record,
+        openPastShifts: openPast,
+        loading: false,
+      );
     } on ApiException catch (e) {
       state = state.copyWith(loading: false, error: e.message);
     }
@@ -746,6 +770,24 @@ class AttendanceController extends Notifier<AttendanceState> {
 
   /// Re-fetch today's record (e.g. pull-to-refresh).
   Future<void> refresh() => _load();
+
+  /// Close a shift from a previous day the telecaller forgot to check out of.
+  /// A 409 (already closed) is treated as a harmless race and just refreshes.
+  Future<void> closePastShift(String recordId) async {
+    state = state.copyWith(actionInProgress: true, clearError: true);
+    try {
+      await ref.read(attendanceRepositoryProvider).closeShift(recordId);
+      await _load();
+      state = state.copyWith(actionInProgress: false);
+    } on ApiException catch (e) {
+      if (e.statusCode == 409) {
+        await _load();
+        state = state.copyWith(actionInProgress: false);
+        return;
+      }
+      state = state.copyWith(actionInProgress: false, error: e.message);
+    }
+  }
 
   /// `POST /api/attendance/check-in`. A 409 (already checked in) is treated
   /// as harmless — it just means another tap/device beat this one there, so

@@ -446,6 +446,67 @@ class _AttendanceCard extends ConsumerWidget {
               record: attendance.record,
               busy: attendance.actionInProgress,
             ),
+          if (attendance.openPastShifts.isNotEmpty) ...[
+            const SizedBox(height: AppSpacing.sm),
+            for (final shift in attendance.openPastShifts)
+              _ForgotCheckoutRow(
+                shift: shift,
+                busy: attendance.actionInProgress,
+                onClose: () => ref
+                    .read(attendanceProvider.notifier)
+                    .closePastShift(shift.id),
+              ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+/// Prompt shown when the telecaller has a shift from a previous day they never
+/// checked out of — lets them close it with one tap.
+class _ForgotCheckoutRow extends StatelessWidget {
+  const _ForgotCheckoutRow({
+    required this.shift,
+    required this.busy,
+    required this.onClose,
+  });
+
+  final AttendanceRecord shift;
+  final bool busy;
+  final VoidCallback onClose;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      margin: const EdgeInsets.only(top: AppSpacing.xs),
+      padding: const EdgeInsets.fromLTRB(12, 10, 8, 10),
+      decoration: BoxDecoration(
+        color: AppColors.warningSurface,
+        borderRadius: BorderRadius.circular(AppRadius.lg),
+        border: Border.all(color: AppColors.warningBorder),
+      ),
+      child: Row(
+        children: [
+          const Icon(Icons.error_outline,
+              size: 16, color: AppColors.tahitiGold),
+          const SizedBox(width: AppSpacing.xs),
+          Expanded(
+            child: Text(
+              "You didn't check out on ${shift.date}.",
+              style: AppText.body13.copyWith(color: AppColors.warningText),
+            ),
+          ),
+          TextButton(
+            onPressed: busy ? null : onClose,
+            style: TextButton.styleFrom(
+              foregroundColor: AppColors.warningDark,
+              padding: const EdgeInsets.symmetric(horizontal: 8),
+              minimumSize: const Size(0, 32),
+              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+            ),
+            child: const Text('Close it'),
+          ),
         ],
       ),
     );

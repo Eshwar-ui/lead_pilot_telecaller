@@ -76,6 +76,9 @@ class ApiEndpoints {
   static const String attendanceCheckIn = '/api/attendance/check-in';
   static const String attendanceCheckOut = '/api/attendance/check-out';
   static const String attendanceToday = '/api/attendance/today';
+  static const String attendanceMine = '/api/attendance/mine';
+  static String attendanceClose(String recordId) =>
+      '/api/attendance/$recordId/close';
 
   // Follow-ups (previously local-only — SharedPreferences had no backend
   // counterpart, so a scheduled/completed follow-up was invisible to the

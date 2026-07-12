@@ -34,6 +34,29 @@ class AttendanceRepository {
     return _fromBody(body);
   }
 
+  /// `GET /api/attendance/mine` — the caller's own recent records (history plus
+  /// any open past shift they forgot to check out of).
+  Future<List<AttendanceRecord>> mine({int days = 7}) async {
+    final body = await _client.get(
+      ApiEndpoints.attendanceMine,
+      query: {'days': days},
+    );
+    final records = body is Map<String, dynamic> && body['records'] is List
+        ? body['records'] as List
+        : const [];
+    return records
+        .whereType<Map<String, dynamic>>()
+        .map(AttendanceRecord.fromJson)
+        .toList();
+  }
+
+  /// `POST /api/attendance/{id}/close` — close a still-open shift the telecaller
+  /// forgot to check out of. Throws [ApiException] (409) if already closed.
+  Future<AttendanceRecord> closeShift(String recordId) async {
+    final body = await _client.post(ApiEndpoints.attendanceClose(recordId));
+    return _fromBody(body);
+  }
+
   AttendanceRecord _fromBody(Object? body) => AttendanceRecord.fromJson(
         body is Map<String, dynamic> ? body : const {},
       );

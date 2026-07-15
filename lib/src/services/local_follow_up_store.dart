@@ -55,6 +55,11 @@ class LocalFollowUpStore {
     await _persist(all.where((t) => t.id != id).toList());
   }
 
+  /// Overwrites the whole stored set — used by the controller's reconcile pass
+  /// to persist the merged local+backend view (adopted statuses, dropped
+  /// remotely-deleted tasks, added remote-only tasks) so it survives a restart.
+  Future<void> replaceAll(List<FollowUpTask> tasks) => _persist(tasks);
+
   Future<void> _persist(List<FollowUpTask> tasks) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(

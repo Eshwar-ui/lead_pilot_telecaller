@@ -287,7 +287,9 @@ class LeadRepository {
     if (name != null) request.fields['name'] = name;
     if (phone != null) request.fields['phone'] = phone;
     if (source != null) request.fields['source'] = source;
-    if (callDate != null) request.fields['call_date'] = callDate.toIso8601String();
+    // Send UTC (with offset) so the backend's tz-aware column stores the right
+    // instant — a local DateTime's toIso8601String() carries no offset.
+    if (callDate != null) request.fields['call_date'] = callDate.toUtc().toIso8601String();
     if (contactKey != null) request.fields['contact_key_override'] = contactKey;
     final token = _getToken?.call();
     if (token != null) request.headers['Authorization'] = 'Bearer $token';
@@ -349,7 +351,12 @@ class LeadRepository {
       temperature: _temperature(j['verdict']),
       source: _source(j['source'], j['tags']),
       intent: _intentLabel(j['intent_bucket']),
-      lastContact: _parseTs(j['last_call_at']) ?? DateTime.now(),
+      // Real "last contacted" time: the most recent call, else when the lead
+      // was created. Never default to now() — that made every never-called
+      // lead show an identical, perpetually-fresh "just now" that never aged.
+      lastContact: _parseTs(j['last_call_at']) ??
+          _parseTs(j['created_at']) ??
+          DateTime.now(),
       totalCalls: _toInt(j['total_calls']),
       averageScore: score,
       memory: const [],

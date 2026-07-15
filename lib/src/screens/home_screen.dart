@@ -804,8 +804,10 @@ class _LeadTile extends ConsumerWidget {
       return;
     }
 
-    // The call is on its way out — log it so it shows in Calls + history.
-    await recordOutboundCall(ref, lead);
+    // Land on the post-call screen (same as the pre-call "Start Call" flow) so
+    // the recording is captured and the call is logged from real evidence —
+    // rather than logging a phantom call the instant the dialer opens.
+    context.push('/leads/${lead.id}/post-call', extra: true);
   }
 
   String _timeStamp() {

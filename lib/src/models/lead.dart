@@ -463,6 +463,7 @@ class CallLogEntry {
     required this.calledAt,
     this.isInbound = false,
     this.leadId,
+    this.callId,
   });
 
   final String id;
@@ -476,6 +477,33 @@ class CallLogEntry {
   final bool isInbound;
   /// Lead ID — used to navigate from call log to lead detail.
   final String? leadId;
+  /// Backend `call_id` once the recording has been uploaded/transcribed. Null
+  /// for a call only observed locally so far. Used as the stable identity when
+  /// de-duplicating the persisted call log against backend history.
+  final String? callId;
+
+  CallLogEntry copyWith({
+    Duration? duration,
+    int? score,
+    DateTime? calledAt,
+    String? callId,
+    String? leadName,
+    String? phone,
+    String? intent,
+    LeadSource? source,
+  }) => CallLogEntry(
+    id: id,
+    leadName: leadName ?? this.leadName,
+    phone: phone ?? this.phone,
+    intent: intent ?? this.intent,
+    source: source ?? this.source,
+    duration: duration ?? this.duration,
+    score: score ?? this.score,
+    calledAt: calledAt ?? this.calledAt,
+    isInbound: isInbound,
+    leadId: leadId,
+    callId: callId ?? this.callId,
+  );
 
   factory CallLogEntry.fromJson(Map<String, dynamic> json) => CallLogEntry(
     id: json['id'] as String? ?? '',
@@ -488,6 +516,7 @@ class CallLogEntry {
     calledAt: _parseDate(json['called_at']),
     isInbound: json['is_inbound'] as bool? ?? false,
     leadId: json['lead_id'] as String?,
+    callId: json['call_id'] as String?,
   );
 
   Map<String, dynamic> toJson() => {
@@ -501,6 +530,7 @@ class CallLogEntry {
     'called_at': calledAt.toIso8601String(),
     'is_inbound': isInbound,
     'lead_id': leadId,
+    'call_id': callId,
   };
 }
 

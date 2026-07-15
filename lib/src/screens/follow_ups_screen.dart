@@ -35,6 +35,11 @@ class _FollowUpsScreenState extends ConsumerState<FollowUpsScreen>
     super.dispose();
   }
 
+  /// Pull-to-refresh handler — re-pulls follow-ups (incl. any created/synced
+  /// on another device under the same telecaller account).
+  Future<void> _refresh() =>
+      ref.read(followUpsProvider.notifier).refresh();
+
   /// Pick a lead, then open the schedule sheet to create a follow-up reminder.
   Future<void> _addFollowUp() async {
     final leads = ref.read(leadsProvider);
@@ -204,10 +209,15 @@ class _FollowUpsScreenState extends ConsumerState<FollowUpsScreen>
               child: TabBarView(
                 controller: _tabs,
                 children: [
-                  _TaskList(tasks: tasks, loading: loading),
+                  _TaskList(
+                    tasks: tasks,
+                    loading: loading,
+                    onRefresh: _refresh,
+                  ),
                   _TaskList(
                     tasks: tasks.where((t) => t.dueToday).toList(),
                     loading: loading,
+                    onRefresh: _refresh,
                     emptyTitle: 'Nothing due today',
                     emptySubtitle: 'Check Upcoming for future tasks',
                   ),
@@ -219,6 +229,7 @@ class _FollowUpsScreenState extends ConsumerState<FollowUpsScreen>
                         )
                         .toList(),
                     loading: loading,
+                    onRefresh: _refresh,
                     emptyTitle: 'No upcoming tasks',
                     emptySubtitle: 'You\'re on top of everything',
                   ),
@@ -238,12 +249,14 @@ class _TaskList extends StatelessWidget {
   const _TaskList({
     required this.tasks,
     this.loading = false,
+    this.onRefresh,
     this.emptyTitle = 'All caught up!',
     this.emptySubtitle = 'No tasks here',
   });
 
   final List<FollowUpTask> tasks;
   final bool loading;
+  final Future<void> Function()? onRefresh;
   final String emptyTitle;
   final String emptySubtitle;
 
@@ -260,44 +273,56 @@ class _TaskList extends StatelessWidget {
         ],
       );
     }
+
+    final Widget list;
     if (tasks.isEmpty) {
-      return Center(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const Icon(Icons.check_circle_outline, size: 40, color: AppColors.tide),
-            const SizedBox(height: 8),
-            Text(
-              emptyTitle,
-              style: AppText.body14.copyWith(
-                color: AppColors.schooner,
-                fontWeight: FontWeight.w600,
+      // Keep the empty state scrollable so pull-to-refresh still works when
+      // there are no tasks yet (e.g. before another device's follow-ups sync).
+      list = ListView(
+        physics: const AlwaysScrollableScrollPhysics(),
+        padding: const EdgeInsets.only(top: 120),
+        children: [
+          Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(Icons.check_circle_outline, size: 40, color: AppColors.tide),
+              const SizedBox(height: 8),
+              Text(
+                emptyTitle,
+                style: AppText.body14.copyWith(
+                  color: AppColors.schooner,
+                  fontWeight: FontWeight.w600,
+                ),
               ),
-            ),
-            const SizedBox(height: 4),
-            Text(emptySubtitle, style: AppText.caption11),
+              const SizedBox(height: 4),
+              Text(emptySubtitle, style: AppText.caption11),
+            ],
+          ),
+        ],
+      );
+    } else {
+      // Separate overdue from the rest for ordering
+      final overdue = tasks.where((t) => t.status == FollowUpStatus.overdue).toList();
+      final rest = tasks.where((t) => t.status != FollowUpStatus.overdue).toList();
+
+      list = ListView(
+        physics: const AlwaysScrollableScrollPhysics(),
+        padding: const EdgeInsets.fromLTRB(16, 8, 16, 100),
+        children: [
+          if (overdue.isNotEmpty) ...[
+            _SectionLabel('OVERDUE', color: AppColors.alizarin),
+            for (final t in overdue) _TaskTile(task: t),
           ],
-        ),
+          if (rest.isNotEmpty) ...[
+            _SectionLabel('TODAY'),
+            for (final t in rest) _TaskTile(task: t),
+          ],
+        ],
       );
     }
 
-    // Separate overdue from the rest for ordering
-    final overdue = tasks.where((t) => t.status == FollowUpStatus.overdue).toList();
-    final rest = tasks.where((t) => t.status != FollowUpStatus.overdue).toList();
-
-    return ListView(
-      padding: const EdgeInsets.fromLTRB(16, 8, 16, 100),
-      children: [
-        if (overdue.isNotEmpty) ...[
-          _SectionLabel('OVERDUE', color: AppColors.alizarin),
-          for (final t in overdue) _TaskTile(task: t),
-        ],
-        if (rest.isNotEmpty) ...[
-          _SectionLabel('TODAY'),
-          for (final t in rest) _TaskTile(task: t),
-        ],
-      ],
-    );
+    if (onRefresh == null) return list;
+    return RefreshIndicator(onRefresh: onRefresh!, child: list);
   }
 }
 

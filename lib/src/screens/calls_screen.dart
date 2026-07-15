@@ -290,7 +290,7 @@ class _CallTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final dur = _fmtDuration(entry.duration);
-    final time = DateFormat('h:mm a').format(entry.calledAt);
+    final time = _fmtWhen(entry.calledAt);
 
     return GestureDetector(
       onTap: entry.leadId != null
@@ -382,4 +382,18 @@ class _CallTile extends StatelessWidget {
     return '$m:$s';
   }
 
+  /// The tile's trailing timestamp. A bare time is only unambiguous for
+  /// today's calls — for anything older, show the date too (with the year
+  /// once it's a previous year) so "3:40 PM" on a two-week-old call isn't
+  /// mistaken for today.
+  String _fmtWhen(DateTime at) {
+    final now = DateTime.now();
+    final callDay = DateTime(at.year, at.month, at.day);
+    final today = DateTime(now.year, now.month, now.day);
+    final diffDays = today.difference(callDay).inDays;
+    if (diffDays == 0) return DateFormat('h:mm a').format(at);
+    if (diffDays == 1) return 'Yesterday, ${DateFormat('h:mm a').format(at)}';
+    if (at.year == now.year) return DateFormat('d MMM, h:mm a').format(at);
+    return DateFormat('d MMM yyyy, h:mm a').format(at);
+  }
 }

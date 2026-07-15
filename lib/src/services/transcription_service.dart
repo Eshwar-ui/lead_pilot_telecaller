@@ -281,7 +281,11 @@ class TranscriptionService {
       // name. `phone` lets the backend key by number (its canonical key), and
       // `call_date` preserves the real recording time (not upload time).
       ..fields['name'] = (name != null && name.isNotEmpty) ? name : leadId
-      ..fields['call_date'] = recording.recordedAt.toIso8601String()
+      // Send UTC (with offset) — the file's modified time is LOCAL and
+      // toIso8601String() on a local DateTime omits the offset, so the backend
+      // (a tz-aware column) would store it skewed by the local UTC offset,
+      // mis-displaying the call time and breaking call-log de-duplication.
+      ..fields['call_date'] = recording.recordedAt.toUtc().toIso8601String()
       ..files.add(await http.MultipartFile.fromPath('file', recording.path));
     if (phone != null && phone.isNotEmpty) request.fields['phone'] = phone;
     if (source != null && source.isNotEmpty) request.fields['source'] = source;

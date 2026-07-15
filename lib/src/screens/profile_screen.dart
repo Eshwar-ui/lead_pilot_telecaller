@@ -189,7 +189,10 @@ class ProfileScreen extends ConsumerWidget {
                       _SettingsRow(
                         icon: Icons.key_outlined,
                         label: 'Change Password',
-                        onTap: () => context.go('/change-password'),
+                        // push (not go) so the change-password screen keeps a
+                        // back stack — otherwise it replaces /home and there's
+                        // nothing to pop back to (no back button).
+                        onTap: () => context.push('/change-password'),
                       ),
                       const Divider(height: 1, indent: 16, endIndent: 16),
                       _SettingsRow(

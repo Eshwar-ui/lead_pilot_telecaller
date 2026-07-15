@@ -44,24 +44,53 @@ class CallRecordingService {
   /// Candidate folders where OEM dialers store call recordings, most-specific
   /// first. Xiaomi/MIUI/HyperOS paths are listed first since that's the primary
   /// target device.
+  ///
+  /// Each folder is scanned **recursively** (see [_maxScanDepth]) because many
+  /// dialers nest recordings in per-number or per-date subfolders
+  /// (e.g. `Recordings/Call/9876543210/Call recording ….m4a`), so a flat scan
+  /// of the top folder alone misses them even on a supported phone. Keep this
+  /// list broad — an extra non-existent path costs nothing (it's skipped), and
+  /// a missing one silently drops that whole phone brand.
   static const List<String> _candidateDirs = [
     // Xiaomi / MIUI / HyperOS
     '/storage/emulated/0/MIUI/sound_recorder/call_rec',
     '/storage/emulated/0/MIUI/sound_recorder/call',
+    '/storage/emulated/0/MIUI/sound_recorder',
     '/storage/emulated/0/Recordings/call_rec',
     // Samsung (One UI)
     '/storage/emulated/0/Recordings/Call',
+    '/storage/emulated/0/Sounds', // older One UI / voice recorder
     '/storage/emulated/0/Call',
-    // Oppo / Realme / ColorOS
+    // Oppo / Realme / OnePlus (ColorOS / OxygenOS)
     '/storage/emulated/0/Recordings/Call Recordings',
     '/storage/emulated/0/Music/Recordings/Call Recordings',
-    // Vivo / Funtouch
+    '/storage/emulated/0/Record/PhoneRecord',
+    // Vivo / iQOO (Funtouch / OriginOS)
     '/storage/emulated/0/Record/Call',
-    // Generic / other dialers
+    '/storage/emulated/0/记录', // some Funtouch builds localise the folder name
+    // Motorola / Lenovo
+    '/storage/emulated/0/Android/data/com.motorola.dialer/files',
+    // Huawei / Honor (EMUI / MagicOS)
+    '/storage/emulated/0/Sounds/CallRecord',
+    '/storage/emulated/0/record',
+    // Transsion — Tecno / Infinix / itel (HiOS / XOS)
+    '/storage/emulated/0/Recorder/call',
+    // Generic / other dialers & third-party recorders
     '/storage/emulated/0/Recordings',
     '/storage/emulated/0/CallRecordings',
     '/storage/emulated/0/PhoneRecord',
+    '/storage/emulated/0/Call recordings',
+    '/storage/emulated/0/Music/Recordings',
   ];
+
+  /// How many subfolder levels below a candidate dir to search. OEM dialers
+  /// nest by number/date at most 1–2 levels; a small cap keeps the scan fast
+  /// and avoids walking huge unrelated trees (e.g. all of `Recordings`).
+  static const int _maxScanDepth = 2;
+
+  /// Safety cap on how many files/dirs we'll visit per candidate root, so a
+  /// pathological folder can't stall the UI thread.
+  static const int _maxEntriesPerRoot = 4000;
 
   static const Set<String> _audioExtensions = {
     'mp3', 'm4a', 'amr', 'wav', 'aac', 'ogg', '3gp', 'mp4',
@@ -129,23 +158,20 @@ class CallRecordingService {
     File? newestMatch;
     DateTime? newestMatchModified;
 
+    final seen = <String>{}; // dedupe files reachable from overlapping roots
     for (final dirPath in _candidateDirs) {
       final dir = Directory(dirPath);
       if (!dir.existsSync()) continue;
 
-      final List<FileSystemEntity> entries;
-      try {
-        entries = dir.listSync(followLinks: false);
-      } on FileSystemException {
-        // Folder exists but isn't readable (permission/sandbox) — skip it.
-        continue;
-      }
+      for (final entry in _audioFilesUnder(dir)) {
+        if (!seen.add(entry.path)) continue;
 
-      for (final entry in entries) {
-        if (entry is! File) continue;
-        if (!_isAudioFile(entry.path)) continue;
-
-        final modified = entry.statSync().modified;
+        final DateTime modified;
+        try {
+          modified = entry.statSync().modified;
+        } on FileSystemException {
+          continue; // vanished/unreadable between listing and stat — skip
+        }
         if (within != null && now.difference(modified) > within) continue;
 
         if (newestModified == null || modified.isAfter(newestModified)) {
@@ -168,6 +194,37 @@ class CallRecordingService {
     return CallRecording.fromFile(chosen);
   }
 
+  /// Yields every audio file under [root], descending at most [_maxScanDepth]
+  /// subfolder levels and visiting at most [_maxEntriesPerRoot] entries. Folders
+  /// that aren't readable (permission/sandbox) are skipped rather than thrown,
+  /// so one locked subfolder never aborts the whole scan.
+  static Iterable<File> _audioFilesUnder(Directory root) sync* {
+    var budget = _maxEntriesPerRoot;
+    // Iterative BFS with an explicit depth so we can bound both depth and count.
+    final queue = <MapEntry<Directory, int>>[MapEntry(root, 0)];
+    while (queue.isNotEmpty) {
+      final current = queue.removeAt(0);
+      final dir = current.key;
+      final depth = current.value;
+
+      final List<FileSystemEntity> entries;
+      try {
+        entries = dir.listSync(followLinks: false);
+      } on FileSystemException {
+        continue; // unreadable folder — skip, don't abort the scan
+      }
+
+      for (final entry in entries) {
+        if (budget-- <= 0) return; // safety cap hit
+        if (entry is File) {
+          if (_isAudioFileStatic(entry.path)) yield entry;
+        } else if (entry is Directory && depth < _maxScanDepth) {
+          queue.add(MapEntry(entry, depth + 1));
+        }
+      }
+    }
+  }
+
   /// Last 10 digits of a phone number (drops +91 / spaces / separators) so a
   /// number matches regardless of how the dialer formatted it in the filename.
   static String _phoneDigits(String? phone) {
@@ -181,7 +238,7 @@ class CallRecordingService {
     return name.replaceAll(RegExp(r'\D'), '');
   }
 
-  bool _isAudioFile(String path) {
+  static bool _isAudioFileStatic(String path) {
     final dot = path.lastIndexOf('.');
     if (dot == -1) return false;
     return _audioExtensions.contains(path.substring(dot + 1).toLowerCase());

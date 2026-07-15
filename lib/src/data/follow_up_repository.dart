@@ -36,8 +36,16 @@ class FollowUpRepository {
   /// follow-ups created on another device / the web dashboard show up here too
   /// (read-back). Each carries its backend id so the merge in FollowUpController
   /// can key on it and never duplicate a task it already has locally.
-  Future<List<FollowUpTask>> list() async {
-    final body = await _client.get(ApiEndpoints.followUps);
+  ///
+  /// [includeCompleted] must be true for the controller's reconcile pass —
+  /// the backend hides completed follow-ups by default, so without it a task
+  /// marked done on another device would look deleted, and its "done" status
+  /// could never propagate here.
+  Future<List<FollowUpTask>> list({bool includeCompleted = false}) async {
+    final body = await _client.get(
+      ApiEndpoints.followUps,
+      query: includeCompleted ? {'include_completed': 'true'} : null,
+    );
     final map = body is Map<String, dynamic> ? body : const <String, dynamic>{};
     final rows = (map['follow_ups'] as List?) ?? const [];
     final now = DateTime.now();

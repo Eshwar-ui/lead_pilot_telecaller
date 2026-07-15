@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_app_utilities/flutter_app_utilities.dart' hide AppSpacing;
 
 import '../services/permission_bootstrap.dart';
@@ -19,6 +20,10 @@ class MainShell extends StatefulWidget {
 class _MainShellState extends State<MainShell> {
   int _tab = 0;
 
+  /// Timestamp of the last "back" press while on the Inbox tab — used to
+  /// implement the "press again to exit" double-tap-to-exit behaviour.
+  DateTime? _lastBackPress;
+
   static const _screens = [
     HomeScreen(),
     CallsScreen(),
@@ -36,15 +41,51 @@ class _MainShellState extends State<MainShell> {
     );
   }
 
+  /// Handles the Android system back button while the tab shell is showing.
+  /// Never lets a single back press drop straight out of the app:
+  ///  - On any non-Inbox tab, back returns to the Inbox tab.
+  ///  - On the Inbox tab, the first back shows "Press back again to exit" and
+  ///    only a second press within 2s actually leaves the app.
+  void _handleBack() {
+    if (_tab != 0) {
+      setState(() => _tab = 0);
+      return;
+    }
+    final now = DateTime.now();
+    if (_lastBackPress == null ||
+        now.difference(_lastBackPress!) > const Duration(seconds: 2)) {
+      _lastBackPress = now;
+      ScaffoldMessenger.of(context)
+        ..clearSnackBars()
+        ..showSnackBar(
+          const SnackBar(
+            content: Text('Press back again to exit'),
+            duration: Duration(seconds: 2),
+          ),
+        );
+      return;
+    }
+    SystemNavigator.pop();
+  }
+
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: AppColors.springWood,
-      resizeToAvoidBottomInset: false,
-      body: IndexedStack(index: _tab, children: _screens),
-      bottomNavigationBar: _BottomNav(
-        currentIndex: _tab,
-        onTap: (i) => setState(() => _tab = i),
+    return PopScope(
+      // We handle back ourselves (tab switch / exit prompt) rather than letting
+      // the framework pop the route, which would exit the app immediately.
+      canPop: false,
+      onPopInvokedWithResult: (didPop, _) {
+        if (didPop) return;
+        _handleBack();
+      },
+      child: Scaffold(
+        backgroundColor: AppColors.springWood,
+        resizeToAvoidBottomInset: false,
+        body: IndexedStack(index: _tab, children: _screens),
+        bottomNavigationBar: _BottomNav(
+          currentIndex: _tab,
+          onTap: (i) => setState(() => _tab = i),
+        ),
       ),
     );
   }

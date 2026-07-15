@@ -238,6 +238,12 @@ class LeadsController extends Notifier<List<Lead>> {
         for (final lead in state)
           if (lead.id == contactKey) _withOverride(result.lead) else lead,
       ];
+      // Persist this lead's confirmed backend call history into the local call
+      // log so those calls survive a restart and show in My Calls without the
+      // lead having to stay open. Upsert/merge is handled downstream.
+      unawaited(ref
+          .read(localCallsProvider.notifier)
+          .ingest(callEntriesFromLead(result.lead)));
       // Read back the authoritative kanban stage (server wins) so a move made on
       // the web dashboard is reflected here too. Fail-soft / fire-and-forget.
       final stage = result.stage;
@@ -287,6 +293,72 @@ class FollowUpsLoadingController extends Notifier<bool> {
   void set(bool value) => state = value;
 }
 
+/// Merges the local follow-up list with the backend's authoritative list so
+/// status changes made on another device (same account) propagate:
+///  - local-only tasks (no backendId yet — created offline) are kept as-is;
+///  - tasks known on both sides adopt the backend's status/schedule, keeping
+///    this device's richer display fields. "Done" is sticky (once either side
+///    says done it stays done) so a local done still syncing isn't reverted;
+///  - tasks that have a backendId but are gone from the backend were deleted
+///    on another device → dropped;
+///  - backend-only tasks (created elsewhere) are added, with the lead's real
+///    name/phone resolved from the inbox where possible.
+///
+/// Pure (no I/O) so it can be unit-tested directly. [remote] must have been
+/// fetched with completed follow-ups included, or done/deleted tasks would be
+/// indistinguishable from ones that never existed.
+List<FollowUpTask> reconcileFollowUps(
+  List<FollowUpTask> local,
+  List<FollowUpTask> remote,
+  Map<String, Lead> leadsById,
+) {
+  final remoteById = {
+    for (final r in remote)
+      if (r.backendId != null) r.backendId!: r,
+  };
+  final result = <FollowUpTask>[];
+  final kept = <String>{};
+
+  for (final t in local) {
+    final bid = t.backendId;
+    if (bid == null) {
+      result.add(t); // never synced — leave it alone
+      continue;
+    }
+    final r = remoteById[bid];
+    if (r == null) continue; // deleted on another device
+    kept.add(bid);
+    final done =
+        t.status == FollowUpStatus.done || r.status == FollowUpStatus.done;
+    final scheduledAt = r.scheduledAt ?? t.scheduledAt;
+    result.add(t.copyWith(
+      status: done ? FollowUpStatus.done : r.status,
+      scheduledAt: scheduledAt,
+      dueToday: done ? false : _followUpIsToday(scheduledAt),
+    ));
+  }
+
+  for (final r in remote) {
+    final bid = r.backendId;
+    if (bid == null || kept.contains(bid)) continue;
+    final lead = r.leadId == null ? null : leadsById[r.leadId];
+    final done = r.status == FollowUpStatus.done;
+    result.add(r.copyWith(
+      leadName: lead?.name ?? r.leadName,
+      phone: lead?.phone ?? r.phone,
+      dueToday: done ? false : _followUpIsToday(r.scheduledAt),
+    ));
+  }
+
+  return result;
+}
+
+bool _followUpIsToday(DateTime? dt) {
+  if (dt == null) return false;
+  final now = DateTime.now();
+  return dt.year == now.year && dt.month == now.month && dt.day == now.day;
+}
+
 class FollowUpController extends Notifier<List<FollowUpTask>> {
   @override
   List<FollowUpTask> build() {
@@ -302,21 +374,19 @@ class FollowUpController extends Notifier<List<FollowUpTask>> {
     try {
       final local = await ref.read(localFollowUpStoreProvider).loadAll();
       state = local;
-      // Additive read-back: pull the backend's follow-ups and surface any this
-      // device doesn't already have locally (created on the web dashboard or
-      // another device). Purely additive + keyed on backendId, so it can never
-      // duplicate or clobber a local task; fail-soft on any error.
+      // Reconcile against the backend so status changes made on another device
+      // (same telecaller account) propagate: a follow-up marked done or deleted
+      // elsewhere is reflected here, not just newly-created ones. Fail-soft —
+      // any error leaves the local list untouched.
       try {
-        final remote = await ref.read(followUpRepositoryProvider).list();
-        final knownBackendIds = {
-          for (final t in local)
-            if (t.backendId != null) t.backendId,
-        };
-        final extras = [
-          for (final r in remote)
-            if (r.backendId != null && !knownBackendIds.contains(r.backendId)) r,
-        ];
-        if (extras.isNotEmpty) state = [...local, ...extras];
+        final remote = await ref
+            .read(followUpRepositoryProvider)
+            .list(includeCompleted: true);
+        final leadsById = {for (final l in ref.read(leadsProvider)) l.id: l};
+        final reconciled = reconcileFollowUps(local, remote, leadsById);
+        state = reconciled;
+        // Persist the merged view so it survives a restart without re-fetching.
+        await ref.read(localFollowUpStoreProvider).replaceAll(reconciled);
       } catch (_) {
         // Offline / backend down — local remains the source of truth.
       }
@@ -324,6 +394,12 @@ class FollowUpController extends Notifier<List<FollowUpTask>> {
       ref.read(followUpsLoadingProvider.notifier).set(false);
     }
   }
+
+
+  /// Pull-to-refresh: re-run the local+remote merge so follow-ups created or
+  /// synced from another device (same telecaller account) show up here without
+  /// an app restart.
+  Future<void> refresh() => _load();
 
   /// Local write is the source of truth for this screen (matches this app's
   /// existing fail-soft pattern); the backend sync is best-effort so a
@@ -351,6 +427,9 @@ class FollowUpController extends Notifier<List<FollowUpTask>> {
   Future<void> markDone(String id) async {
     final backendId = _backendIdFor(id);
     await ref.read(localFollowUpStoreProvider).markDone(id);
+    // Reflect immediately. A concurrent reconcile is safe here — "done" is
+    // sticky, so even if the backend hasn't recorded it yet the local done
+    // isn't reverted.
     unawaited(_load());
     if (backendId != null) {
       try {
@@ -364,13 +443,18 @@ class FollowUpController extends Notifier<List<FollowUpTask>> {
   Future<void> delete(String id) async {
     final backendId = _backendIdFor(id);
     await ref.read(localFollowUpStoreProvider).delete(id);
-    unawaited(_load());
-    if (backendId != null) {
-      try {
-        await ref.read(followUpRepositoryProvider).delete(backendId);
-      } catch (_) {
-        // Fail soft — local state already reflects the deletion.
-      }
+    // Reflect the removal immediately in memory.
+    state = [for (final t in state) if (t.id != id) t];
+    if (backendId == null) return; // local-only task, nothing to sync
+    try {
+      await ref.read(followUpRepositoryProvider).delete(backendId);
+      // Only reconcile AFTER the backend delete lands — otherwise the reconcile
+      // would see the task still present remotely and re-add it.
+      unawaited(_load());
+    } catch (_) {
+      // Fail soft — it's gone locally; a later successful reconcile (once the
+      // backend delete goes through, or if another device already removed it)
+      // will finish the job.
     }
   }
 
@@ -382,62 +466,40 @@ class FollowUpController extends Notifier<List<FollowUpTask>> {
   }
 }
 
-/// Global call log: merges every enriched lead's backend history with calls
-/// placed from inside the app (persisted locally), de-duplicated and sorted
-/// newest-first. Entries appear immediately when a call is started, and again
-/// as leads are enriched or a call is transcribed.
+/// Global call log. Reads ONLY the persisted [localCallsProvider], which holds
+/// calls this device has real evidence for (a recording was found for a call
+/// that ended) plus backend history that's been ingested for leads the
+/// telecaller actually opened. Backend history is no longer merged live off
+/// every enriched lead — that made calls appear merely because a lead was
+/// opened, and vanish again on restart (both reported bugs). Sorted
+/// newest-first.
 final callLogProvider = Provider<List<CallLogEntry>>((ref) {
-  final leads = ref.watch(leadsProvider);
-  final localCalls = ref.watch(localCallsProvider);
-  final entries = <CallLogEntry>[];
-
-  for (final lead in leads) {
-    for (final call in lead.history) {
-      entries.add(CallLogEntry(
-        id: '${lead.id}_${call.calledAt?.millisecondsSinceEpoch ?? call.title.hashCode}',
-        leadName: lead.name,
-        phone: lead.phone,
-        intent: lead.intent,
-        source: lead.source,
-        duration: call.duration,
-        score: call.score,
-        calledAt: call.calledAt ?? DateTime.now(),
-        leadId: lead.id,
-      ));
-    }
-  }
-
-  // Add locally-recorded calls that the backend history doesn't already cover
-  // (same lead + same minute is treated as the same call).
-  bool covered(CallLogEntry local) => entries.any((e) =>
-      e.leadId == local.leadId &&
-      e.calledAt.difference(local.calledAt).inMinutes.abs() < 1);
-  for (final local in localCalls) {
-    if (!covered(local)) entries.add(local);
-  }
-
+  final entries = [...ref.watch(localCallsProvider)];
   entries.sort((a, b) => b.calledAt.compareTo(a.calledAt));
   return entries;
 });
 
-/// Records a call placed from inside the app so it shows up in the call log
-/// and the lead's history right away. Call after a successful dial launch.
-Future<void> recordOutboundCall(WidgetRef ref, Lead lead) async {
-  final now = DateTime.now();
-  await ref.read(localCallsProvider.notifier).record(
-        CallLogEntry(
-          id: '${lead.id}_${now.millisecondsSinceEpoch}',
-          leadName: lead.name,
-          phone: lead.phone,
-          intent: lead.intent,
-          source: lead.source,
-          duration: Duration.zero,
-          score: lead.score,
-          calledAt: now,
-          leadId: lead.id,
-        ),
-      );
-}
+/// Builds persist-able call-log entries from an enriched lead's backend call
+/// history (only calls with a real timestamp).
+List<CallLogEntry> callEntriesFromLead(Lead lead) => [
+      for (final c in lead.history)
+        if (c.calledAt != null)
+          CallLogEntry(
+            id: c.callId ?? '${lead.id}_${c.calledAt!.millisecondsSinceEpoch}',
+            leadName: lead.name,
+            phone: lead.phone,
+            intent: lead.intent,
+            source: lead.source,
+            duration: c.duration,
+            score: c.score,
+            // Backend timestamps come back UTC — store as local so the calls
+            // screen's day-grouping and time formatting (which read the
+            // DateTime's own fields) show the real local call time.
+            calledAt: c.calledAt!.toLocal(),
+            leadId: lead.id,
+            callId: c.callId,
+          ),
+    ];
 
 // ─── Checklist extras ─────────────────────────────────────────────────────────
 

@@ -4,7 +4,9 @@ import 'dart:io' show File;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../models/call_recording.dart';
+import '../models/lead.dart';
 import '../services/call_recording_service.dart';
+import '../services/local_call_store.dart';
 import '../services/local_transcript_store.dart';
 import '../services/local_upload_ledger.dart';
 import '../services/local_upload_outbox.dart';
@@ -230,6 +232,21 @@ class CallCaptureController extends Notifier<Map<String, CallCaptureState>> {
         leadId,
         existing.copyWith(status: CaptureStatus.found, recording: recording),
       );
+      // A recording exists → a real call happened. Log it to My Calls now (real
+      // evidence, unlike merely opening the dialer). It later merges with the
+      // transcribed backend entry for the same call once the lead is enriched.
+      final loggedLead = matches.isEmpty ? null : matches.first;
+      unawaited(ref.read(localCallsProvider.notifier).record(CallLogEntry(
+            id: '${leadId}_${recording.recordedAt.millisecondsSinceEpoch}',
+            leadName: loggedLead?.name ?? '',
+            phone: loggedLead?.phone ?? '',
+            intent: loggedLead?.intent ?? '',
+            source: loggedLead?.source ?? LeadSource.organic,
+            duration: Duration.zero,
+            score: loggedLead?.score ?? 0,
+            calledAt: recording.recordedAt,
+            leadId: leadId,
+          )));
       // Auto-start transcription immediately — no manual tap required.
       unawaited(transcribe(leadId));
     } catch (e) {

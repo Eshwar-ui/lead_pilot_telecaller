@@ -241,7 +241,13 @@ class _PipelineStrip extends ConsumerWidget {
                       label: _stages[i].label,
                       isActive: _stages[i] == stage,
                       isDead: _stages[i].isTerminalNegative,
-                      onTap: () => _selectStage(context, ref, _stages[i]),
+                      // Forward-only: earlier stages are locked so a lead can't
+                      // be tapped back to a stage it has already passed (the
+                      // backend rejects backward moves too). Terminal Closed
+                      // Lost / Junk sit last, so they stay reachable.
+                      onTap: _stages[i].index < stage.index
+                          ? null
+                          : () => _selectStage(context, ref, _stages[i]),
                     ),
                   ),
                   if (i < _stages.length - 1)
@@ -271,16 +277,21 @@ class _StageChip extends StatelessWidget {
   final String label;
   final bool isActive;
   final bool isDead;
-  final VoidCallback onTap;
+  /// Null when this stage is locked (an already-passed stage) — the chip then
+  /// renders dimmed and ignores taps.
+  final VoidCallback? onTap;
 
   @override
   Widget build(BuildContext context) {
     final activeColor = isDead ? AppColors.alizarin : AppColors.blueRibbon;
     final activeSurface = isDead ? AppColors.redSurface : AppColors.ribbonSurface;
+    final locked = onTap == null && !isActive;
 
     return GestureDetector(
       onTap: onTap,
-      child: Column(
+      child: Opacity(
+        opacity: locked ? 0.45 : 1,
+        child: Column(
         children: [
           Container(
             width: 20,
@@ -315,6 +326,7 @@ class _StageChip extends StatelessWidget {
             ),
           ),
         ],
+        ),
       ),
     );
   }

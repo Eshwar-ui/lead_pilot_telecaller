@@ -81,6 +81,12 @@ class _ChangePasswordScreenState extends ConsumerState<ChangePasswordScreen> {
           : AppBar(
               backgroundColor: AppColors.springWood,
               elevation: 0,
+              // Explicit back button so this screen is always dismissable, even
+              // if it was reached without a poppable stack (falls back to Home).
+              leading: BackButton(
+                onPressed: () =>
+                    context.canPop() ? context.pop() : context.go('/home'),
+              ),
               title: Text('Change Password', style: AppText.display20),
             ),
       body: SafeArea(

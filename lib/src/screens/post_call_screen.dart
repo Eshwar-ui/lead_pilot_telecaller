@@ -88,10 +88,38 @@ class _PostCallScreenState extends ConsumerState<PostCallScreen>
     if (state == AppLifecycleState.resumed) {
       _syncCallNotes();
       // Returning from the call screen — the recording should exist by now.
-      ref.read(callCaptureProvider.notifier).captureLatest(widget.leadId);
+      // Some OEM dialers flush the file a second or two after the call ends, so
+      // a single scan on resume can miss it (the reported "have to upload
+      // manually"). Retry a few times before giving up.
+      unawaited(_captureWithRetries());
       // Retry any uploads that failed earlier (offline/network drop) — durable
       // outbox drain, so a queued recording isn't lost.
       unawaited(ref.read(callCaptureProvider.notifier).drainOutbox());
+    }
+  }
+
+  /// Scans for the just-ended call's recording, retrying with a short backoff
+  /// so a dialer that writes its file slightly late is still picked up
+  /// automatically instead of forcing a manual upload. Stops as soon as a
+  /// recording is found (or transcription is already under way).
+  Future<void> _captureWithRetries() async {
+    const delays = [
+      Duration.zero,
+      Duration(seconds: 2),
+      Duration(seconds: 3),
+      Duration(seconds: 5),
+    ];
+    final notifier = ref.read(callCaptureProvider.notifier);
+    for (final delay in delays) {
+      if (delay > Duration.zero) await Future<void>.delayed(delay);
+      if (!mounted) return;
+      final current = notifier.stateFor(widget.leadId);
+      if (current.hasRecording ||
+          current.isBusy ||
+          current.status == CaptureStatus.transcribed) {
+        return; // already found / processing — nothing more to do
+      }
+      await notifier.captureLatest(widget.leadId);
     }
   }
 

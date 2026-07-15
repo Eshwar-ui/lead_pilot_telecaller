@@ -119,9 +119,10 @@ class _PreCallScreenState extends ConsumerState<PreCallScreen> {
                   return;
                 }
 
-                // Log the outbound call so it persists in Calls + history.
-                await recordOutboundCall(ref, lead);
-                if (!context.mounted) return;
+                // The call is NOT logged here just because the dialer opened —
+                // it's logged on the post-call screen only once a recording is
+                // actually found, so abandoning the dialer doesn't create a
+                // phantom call entry.
 
                 // Replace pre-call with post-call so back returns to lead detail.
                 // extra=true tells PostCallScreen to reset any previous capture

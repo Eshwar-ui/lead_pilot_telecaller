@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_app_utilities/flutter_app_utilities.dart'
+    hide AppSpacing, AppRadius;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
@@ -23,6 +25,11 @@ class _CallsScreenState extends ConsumerState<CallsScreen> {
   final _searchController = TextEditingController();
   String _query = '';
 
+  /// 'All' | 'Inbound' | 'Outbound'.
+  String _direction = 'All';
+
+  static const _directions = ['All', 'Inbound', 'Outbound'];
+
   @override
   void dispose() {
     _searchController.dispose();
@@ -34,13 +41,18 @@ class _CallsScreenState extends ConsumerState<CallsScreen> {
     final allCalls = ref.watch(callLogProvider);
     final loading = ref.watch(leadsLoadingProvider) && allCalls.isEmpty;
     final q = _query.trim().toLowerCase();
-    final callLog = q.isEmpty
+    var callLog = q.isEmpty
         ? allCalls
         : allCalls
             .where((e) =>
                 e.leadName.toLowerCase().contains(q) ||
                 e.phone.toLowerCase().contains(q))
             .toList();
+    if (_direction != 'All') {
+      final wantInbound = _direction == 'Inbound';
+      callLog = callLog.where((e) => e.isInbound == wantInbound).toList();
+    }
+    final syncState = ref.watch(callLogSyncProvider);
 
     // Group by date section label
     final today = <CallLogEntry>[];
@@ -73,6 +85,10 @@ class _CallsScreenState extends ConsumerState<CallsScreen> {
               title: 'My Calls',
               subtitle: '${allCalls.length} call${allCalls.length == 1 ? '' : 's'} logged',
               actions: [
+                _DirectionFilterButton(
+                  active: _direction,
+                  onTap: _openDirectionFilterSheet,
+                ),
                 LpIconButton(
                   icon: _searching ? Icons.close : Icons.search,
                   onTap: () => setState(() {
@@ -89,6 +105,12 @@ class _CallsScreenState extends ConsumerState<CallsScreen> {
             if (ref.watch(leadsUsingFallbackProvider))
               LpFallbackBanner(
                 onRetry: () => ref.read(leadsProvider.notifier).refresh(),
+              ),
+
+            if (syncState.checked && !syncState.permissionGranted)
+              _CallLogPermissionCard(
+                onEnable: () =>
+                    ref.read(callLogSyncProvider.notifier).requestPermissionAndSync(),
               ),
 
             if (_searching)
@@ -230,6 +252,199 @@ class _CallsScreenState extends ConsumerState<CallsScreen> {
       ),
     );
   }
+
+  Future<void> _openDirectionFilterSheet() async {
+    await showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: AppColors.white,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (sheetContext) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(
+            AppSpacing.lg, AppSpacing.lg, AppSpacing.lg, AppSpacing.xl,
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Center(
+                child: Container(
+                  width: 36,
+                  height: 4,
+                  margin: const EdgeInsets.only(bottom: AppSpacing.lg),
+                  decoration: BoxDecoration(
+                    color: AppColors.westar,
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
+              ),
+              Text('Filter by direction', style: AppText.display20.copyWith(fontSize: 18)),
+              const SizedBox(height: AppSpacing.md),
+              for (final d in _directions)
+                TapScale(
+                  onTap: () {
+                    setState(() => _direction = d);
+                    Navigator.of(sheetContext).pop();
+                  },
+                  child: Container(
+                    margin: const EdgeInsets.only(bottom: AppSpacing.xs),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: AppSpacing.md, vertical: AppSpacing.sm,
+                    ),
+                    decoration: BoxDecoration(
+                      color: d == _direction ? AppColors.ribbonSurface : AppColors.pampas,
+                      borderRadius: BorderRadius.circular(AppRadius.md),
+                      border: Border.all(
+                        color: d == _direction ? AppColors.blueRibbon : AppColors.westar,
+                      ),
+                    ),
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            d,
+                            style: AppText.body14.copyWith(
+                              fontWeight: FontWeight.w600,
+                              color: d == _direction ? AppColors.blueRibbon : AppColors.zeus,
+                            ),
+                          ),
+                        ),
+                        if (d == _direction)
+                          const Icon(Icons.check, size: 18, color: AppColors.blueRibbon),
+                      ],
+                    ),
+                  ),
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _DirectionFilterButton extends StatelessWidget {
+  const _DirectionFilterButton({required this.active, required this.onTap});
+
+  final String active;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final filterActive = active != 'All';
+    return TapScale(
+      onTap: onTap,
+      child: SizedBox(
+        width: 40,
+        height: 40,
+        child: Stack(
+          clipBehavior: Clip.none,
+          children: [
+            Container(
+              decoration: BoxDecoration(
+                color: filterActive ? AppColors.blueRibbon : AppColors.pampas,
+                shape: BoxShape.circle,
+                border: Border.all(
+                  color: filterActive ? AppColors.blueRibbon : AppColors.westar,
+                ),
+              ),
+              child: Center(
+                child: Icon(
+                  Icons.tune,
+                  size: 18,
+                  color: filterActive ? AppColors.white : AppColors.merlin,
+                ),
+              ),
+            ),
+            if (filterActive)
+              Positioned(
+                right: -1,
+                top: -1,
+                child: Container(
+                  width: 9,
+                  height: 9,
+                  decoration: BoxDecoration(
+                    color: AppColors.alizarin,
+                    shape: BoxShape.circle,
+                    border: Border.all(color: AppColors.white, width: 1.5),
+                  ),
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Prompts the telecaller to grant call-log access so this screen can show
+/// every real call (inbound/outbound/missed), not just calls placed through
+/// the app's own Call button. Shown only after the initial permission check
+/// completes and comes back denied — never blocks the (already-working)
+/// app-placed-call list underneath it.
+class _CallLogPermissionCard extends StatelessWidget {
+  const _CallLogPermissionCard({required this.onEnable});
+
+  final VoidCallback onEnable;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      margin: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+      padding: const EdgeInsets.all(AppSpacing.md),
+      decoration: BoxDecoration(
+        color: AppColors.zircon,
+        borderRadius: BorderRadius.circular(AppRadius.lg),
+        border: Border.all(color: AppColors.periwinkle),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Icon(Icons.call_outlined, size: 18, color: AppColors.governorBay),
+          const SizedBox(width: AppSpacing.sm),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'See every call, not just calls made from this app',
+                  style: AppText.body14.copyWith(
+                    fontWeight: FontWeight.w700,
+                    color: AppColors.governorBay,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  "Grant call log access to log inbound, outbound and missed calls automatically.",
+                  style: AppText.caption11.copyWith(color: AppColors.governorBay),
+                ),
+                const SizedBox(height: AppSpacing.sm),
+                TapScale(
+                  onTap: onEnable,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                    decoration: BoxDecoration(
+                      color: AppColors.blueRibbon,
+                      borderRadius: BorderRadius.circular(AppRadius.sm),
+                    ),
+                    child: Text(
+                      'Enable',
+                      style: AppText.body13.copyWith(
+                        color: AppColors.white,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
 }
 
 class _SectionLabel extends StatelessWidget {
@@ -346,30 +561,46 @@ class _CallTile extends StatelessWidget {
                     Text(dur, style: AppText.mono(size: 11, color: AppColors.schooner)),
                   ],
                 ),
-                const SizedBox(height: 5),
-                Row(
-                  children: [
-                    LpMiniPill(
-                      label: entry.source.displayName,
-                      foreground: AppColors.governorBay,
-                      background: AppColors.zircon,
-                      border: AppColors.periwinkle,
-                    ),
-                    const SizedBox(width: 4),
-                    LpMiniPill(
-                      label: entry.intent,
-                      foreground: AppColors.greenHaze,
-                      background: AppColors.foam,
-                      border: AppColors.iceCold,
-                    ),
-                  ],
-                ),
+                // Source/intent pills only mean something once this call is
+                // tied to a known lead — a bare device call-log entry (e.g. a
+                // personal call, or a number not in the CRM yet) has neither,
+                // and showing an empty or placeholder pill for it would read
+                // as a fabricated lead-source claim.
+                if (entry.leadId != null &&
+                    (entry.source.displayName.isNotEmpty || entry.intent.isNotEmpty)) ...[
+                  const SizedBox(height: 5),
+                  Wrap(
+                    spacing: 4,
+                    runSpacing: 4,
+                    children: [
+                      LpMiniPill(
+                        label: entry.source.displayName,
+                        foreground: AppColors.governorBay,
+                        background: AppColors.zircon,
+                        border: AppColors.periwinkle,
+                      ),
+                      if (entry.intent.isNotEmpty)
+                        LpMiniPill(
+                          label: entry.intent,
+                          foreground: AppColors.greenHaze,
+                          background: AppColors.foam,
+                          border: AppColors.iceCold,
+                        ),
+                    ],
+                  ),
+                ],
               ],
             ),
           ),
 
-          const SizedBox(width: AppSpacing.xs),
-          ScoreRing(score: entry.score, size: 38),
+          // A score ring only makes sense for a call that was actually
+          // recorded and AI-analyzed (has a backend call_id) — a plain
+          // device call-log entry has no score, and ScoreRing's own
+          // score<=0 fallback reads as "New", which is misleading here.
+          if (entry.callId != null) ...[
+            const SizedBox(width: AppSpacing.xs),
+            ScoreRing(score: entry.score, size: 38),
+          ],
         ],
       ),
     ),

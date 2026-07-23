@@ -121,28 +121,6 @@ class ProfileScreen extends ConsumerWidget {
 
                   const SizedBox(height: AppSpacing.md),
 
-                  // ── Preferences ───────────────────────────────────────────
-                  _SettingsSection(
-                    title: 'PREFERENCES',
-                    children: [
-                      _LanguageRow(
-                        selected: profile.language,
-                        onSelect: (lang) => ref
-                            .read(userProfileProvider.notifier)
-                            .update(profile.copyWith(language: lang)),
-                      ),
-                      const Divider(height: 1, indent: 16, endIndent: 16),
-                      _NotificationsRow(
-                        enabled: profile.notificationsEnabled,
-                        onChanged: (v) => ref
-                            .read(userProfileProvider.notifier)
-                            .update(profile.copyWith(notificationsEnabled: v)),
-                      ),
-                    ],
-                  ),
-
-                  const SizedBox(height: AppSpacing.sm),
-
                   // ── Compliance ────────────────────────────────────────────
                   _SettingsSection(
                     title: 'COMPLIANCE',
@@ -716,104 +694,6 @@ class _SettingsRow extends StatelessWidget {
               const Icon(Icons.chevron_right, size: 16, color: AppColors.tide),
           ],
         ),
-      ),
-    );
-  }
-}
-
-class _NotificationsRow extends StatelessWidget {
-  const _NotificationsRow({required this.enabled, required this.onChanged});
-
-  final bool enabled;
-  final ValueChanged<bool> onChanged;
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
-      child: Row(
-        children: [
-          const Icon(Icons.notifications_outlined,
-              size: 18, color: AppColors.schooner),
-          const SizedBox(width: AppSpacing.sm),
-          Expanded(
-            child: Text(
-              'Notifications',
-              style: AppText.body14.copyWith(color: AppColors.zeus),
-            ),
-          ),
-          Switch.adaptive(
-            value: enabled,
-            activeThumbColor: AppColors.blueRibbon,
-            onChanged: onChanged,
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _LanguageRow extends StatelessWidget {
-  const _LanguageRow({required this.selected, required this.onSelect});
-
-  final String selected;
-  final ValueChanged<String> onSelect;
-
-  static const _scripts = ['తె', 'हि', 'N', 'த', 'ಕ'];
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-      child: Row(
-        children: [
-          const Icon(Icons.language_outlined,
-              size: 18, color: AppColors.schooner),
-          const SizedBox(width: AppSpacing.sm),
-          Expanded(
-            child: Text(
-              'Language',
-              style: AppText.body14.copyWith(color: AppColors.zeus),
-            ),
-          ),
-          for (final script in _scripts)
-            Padding(
-              padding: const EdgeInsets.only(left: 5),
-              child: GestureDetector(
-                onTap: () => onSelect(script),
-                child: Container(
-                  width: 28,
-                  height: 28,
-                  decoration: BoxDecoration(
-                    color: script == selected
-                        ? AppColors.ribbonSurface
-                        : AppColors.pampas,
-                    borderRadius: BorderRadius.circular(AppRadius.xs),
-                    border: Border.all(
-                      color: script == selected
-                          ? AppColors.blueRibbon
-                          : AppColors.westar,
-                      width: script == selected ? 1.5 : 1,
-                    ),
-                  ),
-                  child: Center(
-                    child: Text(
-                      script,
-                      style: AppText.body13.copyWith(
-                        fontSize: 12,
-                        color: script == selected
-                            ? AppColors.blueRibbon
-                            : AppColors.merlin,
-                        fontWeight: script == selected
-                            ? FontWeight.w700
-                            : FontWeight.w400,
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-            ),
-        ],
       ),
     );
   }

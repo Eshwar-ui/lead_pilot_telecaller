@@ -6,6 +6,7 @@ CallLogEntry entry({
   required String id,
   String leadId = 'lead1',
   String? callId,
+  String? deviceCallId,
   int score = 0,
   Duration duration = Duration.zero,
   DateTime? at,
@@ -21,6 +22,7 @@ CallLogEntry entry({
       calledAt: at ?? DateTime(2026, 7, 15, 10, 30),
       leadId: leadId,
       callId: callId,
+      deviceCallId: deviceCallId,
     );
 
 void main() {
@@ -75,6 +77,22 @@ void main() {
       final b = entry(id: 'b', leadId: 'lead2');
       final out = mergeCallEntries([a], [b]);
       expect(out, hasLength(2));
+    });
+
+    test('re-syncing the same device call log entry upserts, not duplicates', () {
+      final first = entry(id: 'a', deviceCallId: 'dev1', duration: const Duration(seconds: 10));
+      final resynced = entry(id: 'b', deviceCallId: 'dev1', duration: const Duration(seconds: 45));
+      final out = mergeCallEntries([first], [resynced]);
+      expect(out, hasLength(1));
+      expect(out.single.duration, const Duration(seconds: 45));
+    });
+
+    test('two different device calls to the same lead within the merge window '
+        'stay distinct when both carry a device id', () {
+      final a = entry(id: 'a', deviceCallId: 'dev1', at: DateTime(2026, 7, 15, 10, 30));
+      final b = entry(id: 'b', deviceCallId: 'dev2', at: DateTime(2026, 7, 15, 10, 31));
+      final out = mergeCallEntries([a], [b]);
+      expect(out, hasLength(2), reason: 'distinct device ids must never fuse');
     });
   });
 }

@@ -13,6 +13,7 @@ import '../theme/app_colors.dart';
 import '../theme/app_spacing.dart';
 import '../theme/app_theme.dart';
 import '../widgets/leadpilot_widgets.dart';
+import '../widgets/schedule_call_sheet.dart';
 import '../widgets/shimmer.dart';
 
 class HomeScreen extends ConsumerStatefulWidget {
@@ -167,36 +168,67 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
             child: Builder(builder: (_) {
               final callLog = ref.watch(callLogProvider);
               final now = DateTime.now();
-              final callsToday = callLog
-                  .where((e) =>
-                      e.calledAt.year == now.year &&
-                      e.calledAt.month == now.month &&
-                      e.calledAt.day == now.day)
+              final callsToday = callLog.where((e) =>
+                  e.calledAt.year == now.year &&
+                  e.calledAt.month == now.month &&
+                  e.calledAt.day == now.day);
+              // A "good" call by the same score band the rest of the app
+              // already uses for green (ScoreRing/score-color, ≥60 = warm
+              // or better) — the backend doesn't emit a separate per-call
+              // sentiment label the app can read yet, so call score is the
+              // best available proxy for "went well".
+              final positiveToday = callsToday.where((e) => e.score >= 60).length;
+              final followUpsDue = ref
+                  .watch(followUpsProvider)
+                  .where((t) => t.dueToday && t.status != FollowUpStatus.done)
                   .length;
-              final scored =
-                  ref.watch(leadsProvider).where((l) => l.score > 0).toList();
-              final avgScore = scored.isEmpty
-                  ? null
-                  : scored.map((l) => l.score).reduce((a, b) => a + b) ~/
-                      scored.length;
-              return Row(
+              final highIntent = ref
+                  .watch(leadsProvider)
+                  .where((l) => l.intent.toLowerCase().contains('high'))
+                  .length;
+              return Column(
                 children: [
-                  Expanded(
-                    child: _StatTile(
-                      icon: Icons.call_outlined,
-                      label: 'Calls Today',
-                      value: '$callsToday',
-                    ),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: _StatTile(
+                          icon: Icons.call_outlined,
+                          label: 'Calls Today',
+                          value: '${callsToday.length}',
+                        ),
+                      ),
+                      const SizedBox(width: AppSpacing.sm),
+                      Expanded(
+                        child: _StatTile(
+                          icon: Icons.check_circle_outline,
+                          label: 'Positive Calls',
+                          value: '$positiveToday',
+                          valueColor: AppColors.salem,
+                        ),
+                      ),
+                    ],
                   ),
-                  const SizedBox(width: AppSpacing.sm),
-                  Expanded(
-                    child: _StatTile(
-                      icon: Icons.show_chart,
-                      label: 'Avg Score',
-                      value: avgScore?.toString() ?? '—',
-                      valueColor: AppColors.blueRibbon,
-                      suffix: avgScore == null ? null : '/100',
-                    ),
+                  const SizedBox(height: AppSpacing.sm),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: _StatTile(
+                          icon: Icons.event_outlined,
+                          label: 'Follow-ups Due',
+                          value: '$followUpsDue',
+                          valueColor: AppColors.tahitiGold,
+                        ),
+                      ),
+                      const SizedBox(width: AppSpacing.sm),
+                      Expanded(
+                        child: _StatTile(
+                          icon: Icons.bolt,
+                          label: 'High Intent Leads',
+                          value: '$highIntent',
+                          valueColor: AppColors.blueRibbon,
+                        ),
+                      ),
+                    ],
                   ),
                 ],
               );
@@ -497,14 +529,12 @@ class _StatTile extends StatelessWidget {
     required this.label,
     required this.value,
     this.valueColor = AppColors.zeus,
-    this.suffix,
   });
 
   final IconData icon;
   final String label;
   final String value;
   final Color valueColor;
-  final String? suffix;
 
   @override
   Widget build(BuildContext context) {
@@ -534,31 +564,13 @@ class _StatTile extends StatelessWidget {
             ],
           ),
           const SizedBox(height: AppSpacing.xs),
-          // Value row with optional change/suffix
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.baseline,
-            textBaseline: TextBaseline.alphabetic,
-            children: [
-              Text(
-                value,
-                style: AppText.mono(
-                  size: 28,
-                  weight: FontWeight.w700,
-                  color: valueColor,
-                ),
-              ),
-              if (suffix != null) ...[
-                const SizedBox(width: AppSpacing.xxs),
-                Text(
-                  suffix!,
-                  style: AppText.body13.copyWith(
-                    color: AppColors.schooner,
-                    fontWeight: FontWeight.w500,
-                    fontSize: 12,
-                  ),
-                ),
-              ],
-            ],
+          Text(
+            value,
+            style: AppText.mono(
+              size: 28,
+              weight: FontWeight.w700,
+              color: valueColor,
+            ),
           ),
         ],
       ),
@@ -731,32 +743,60 @@ class _LeadTile extends ConsumerWidget {
                     ),
                   ),
                   const SizedBox(width: AppSpacing.sm),
-                  // Call button — taps go directly to caller selector
-                  GestureDetector(
-                    behavior: HitTestBehavior.opaque,
-                    onTap: () => _startQuickCall(context, ref),
-                    child: Container(
-                      width: 40,
-                      height: 40,
-                      decoration: BoxDecoration(
-                        color: AppColors.blueRibbon,
-                        shape: BoxShape.circle,
-                        boxShadow: [
-                          BoxShadow(
-                            color: AppColors.blueRibbon.withValues(alpha: 0.25),
-                            offset: const Offset(0, 2),
-                            blurRadius: 4,
+                  Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      // Call button — taps go directly to caller selector
+                      GestureDetector(
+                        behavior: HitTestBehavior.opaque,
+                        onTap: () => _startQuickCall(context, ref),
+                        child: Container(
+                          width: 40,
+                          height: 40,
+                          decoration: BoxDecoration(
+                            color: AppColors.blueRibbon,
+                            shape: BoxShape.circle,
+                            boxShadow: [
+                              BoxShadow(
+                                color: AppColors.blueRibbon.withValues(alpha: 0.25),
+                                offset: const Offset(0, 2),
+                                blurRadius: 4,
+                              ),
+                            ],
                           ),
-                        ],
-                      ),
-                      child: const Center(
-                        child: Icon(
-                          Icons.call,
-                          size: 16,
-                          color: AppColors.white,
+                          child: const Center(
+                            child: Icon(
+                              Icons.call,
+                              size: 16,
+                              color: AppColors.white,
+                            ),
+                          ),
                         ),
                       ),
-                    ),
+                      const SizedBox(height: AppSpacing.xs),
+                      // Follow-up button — schedules a next-call reminder for
+                      // this lead without opening the lead detail screen.
+                      GestureDetector(
+                        behavior: HitTestBehavior.opaque,
+                        onTap: () => ScheduleCallSheet.show(context, lead),
+                        child: Container(
+                          width: 40,
+                          height: 40,
+                          decoration: BoxDecoration(
+                            color: AppColors.pampas,
+                            shape: BoxShape.circle,
+                            border: Border.all(color: AppColors.westar),
+                          ),
+                          child: const Center(
+                            child: Icon(
+                              Icons.event_outlined,
+                              size: 16,
+                              color: AppColors.merlin,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
                   ),
                 ],
               ),

@@ -485,6 +485,7 @@ class CallLogEntry {
     this.isInbound = false,
     this.leadId,
     this.callId,
+    this.deviceCallId,
   });
 
   final String id;
@@ -502,6 +503,11 @@ class CallLogEntry {
   /// for a call only observed locally so far. Used as the stable identity when
   /// de-duplicating the persisted call log against backend history.
   final String? callId;
+  /// The device's native call-log row id (from the `call_log` plugin), set
+  /// only for entries read from the phone's real call history — used as the
+  /// dedup/sync identity for those entries (a call placed through the app's
+  /// own dialer has no device id until the OS call log catches up with it).
+  final String? deviceCallId;
 
   CallLogEntry copyWith({
     Duration? duration,
@@ -512,6 +518,8 @@ class CallLogEntry {
     String? phone,
     String? intent,
     LeadSource? source,
+    bool? isInbound,
+    String? deviceCallId,
   }) => CallLogEntry(
     id: id,
     leadName: leadName ?? this.leadName,
@@ -521,9 +529,10 @@ class CallLogEntry {
     duration: duration ?? this.duration,
     score: score ?? this.score,
     calledAt: calledAt ?? this.calledAt,
-    isInbound: isInbound,
+    isInbound: isInbound ?? this.isInbound,
     leadId: leadId,
     callId: callId ?? this.callId,
+    deviceCallId: deviceCallId ?? this.deviceCallId,
   );
 
   factory CallLogEntry.fromJson(Map<String, dynamic> json) => CallLogEntry(
@@ -538,6 +547,7 @@ class CallLogEntry {
     isInbound: json['is_inbound'] as bool? ?? false,
     leadId: json['lead_id'] as String?,
     callId: json['call_id'] as String?,
+    deviceCallId: json['device_call_id'] as String?,
   );
 
   Map<String, dynamic> toJson() => {
@@ -552,6 +562,7 @@ class CallLogEntry {
     'is_inbound': isInbound,
     'lead_id': leadId,
     'call_id': callId,
+    'device_call_id': deviceCallId,
   };
 }
 

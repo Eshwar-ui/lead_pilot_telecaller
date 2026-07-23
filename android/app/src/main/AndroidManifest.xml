@@ -5,6 +5,11 @@
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
     <!-- Detect call-end so the overlay can auto-return to the app -->
     <uses-permission android:name="android.permission.READ_PHONE_STATE" />
+    <!-- Dialer-style "all calls" screen: read the device's real call history
+         (every inbound/outbound/missed call, not just calls placed through
+         this app). Google Play restricted permission — read-only; deliberately
+         NOT requesting WRITE_CALL_LOG, which this app never needs. -->
+    <uses-permission android:name="android.permission.READ_CALL_LOG" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
 

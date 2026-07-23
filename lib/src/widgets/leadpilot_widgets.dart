@@ -566,6 +566,7 @@ class PrimaryButton extends StatelessWidget {
     required this.onTap,
     this.color = AppColors.blueRibbon,
     this.expanded = true,
+    this.loading = false,
   });
 
   final String label;
@@ -574,42 +575,60 @@ class PrimaryButton extends StatelessWidget {
   final Color color;
   final bool expanded;
 
+  /// Shows a spinner in place of the label/icon and disables taps — for an
+  /// in-flight submit, so the button itself communicates "working" instead of
+  /// relying on the caller to swap in different label text.
+  final bool loading;
+
   @override
   Widget build(BuildContext context) {
     final button = TapScale(
-      onTap: onTap,
+      onTap: loading ? null : onTap,
       child: Container(
         height: 52,
         padding: const EdgeInsets.symmetric(horizontal: 18),
         decoration: BoxDecoration(
           color: color,
           borderRadius: BorderRadius.circular(AppRadius.lg),
-          boxShadow: color == AppColors.blueRibbon
-              ? AppShadows.blueAction
-              : AppShadows.card,
+          boxShadow: (onTap == null && !loading)
+              ? null
+              : (color == AppColors.blueRibbon
+                  ? AppShadows.blueAction
+                  : AppShadows.card),
         ),
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          mainAxisSize: expanded ? MainAxisSize.max : MainAxisSize.min,
-          children: [
-            if (icon != null) ...[
-              Icon(icon, size: 18, color: AppColors.white),
-              const AppGap.xs(axis: Axis.horizontal),
-            ],
-            if (label.isNotEmpty)
-              Flexible(
-                child: Text(
-                  label,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: AppText.body14.copyWith(
-                    color: AppColors.white,
-                    fontWeight: FontWeight.w600,
+        child: loading
+            ? const Center(
+                child: SizedBox(
+                  width: 20,
+                  height: 20,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2.4,
+                    valueColor: AlwaysStoppedAnimation(AppColors.white),
                   ),
                 ),
+              )
+            : Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                mainAxisSize: expanded ? MainAxisSize.max : MainAxisSize.min,
+                children: [
+                  if (icon != null) ...[
+                    Icon(icon, size: 18, color: AppColors.white),
+                    const AppGap.xs(axis: Axis.horizontal),
+                  ],
+                  if (label.isNotEmpty)
+                    Flexible(
+                      child: Text(
+                        label,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: AppText.body14.copyWith(
+                          color: AppColors.white,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ),
+                ],
               ),
-          ],
-        ),
       ),
     );
 
@@ -753,6 +772,7 @@ class LpTextField extends StatelessWidget {
     this.maxLines = 1,
     this.obscureText = false,
     this.keyboardType,
+    this.enabled = true,
   });
 
   final String value;
@@ -762,11 +782,16 @@ class LpTextField extends StatelessWidget {
   final bool obscureText;
   final TextInputType? keyboardType;
 
+  /// False while a submit using this field's value is in flight, so the user
+  /// can't edit (or double-submit) mid-request.
+  final bool enabled;
+
   @override
   Widget build(BuildContext context) {
     return TextFormField(
       initialValue: value,
       onChanged: onChanged,
+      enabled: enabled,
       maxLines: obscureText ? 1 : maxLines,
       obscureText: obscureText,
       keyboardType: keyboardType,
@@ -774,7 +799,9 @@ class LpTextField extends StatelessWidget {
       decoration: InputDecoration(
         isDense: true,
         filled: true,
-        fillColor: focused ? AppColors.white : AppColors.pampas,
+        fillColor: !enabled
+            ? AppColors.pampas
+            : (focused ? AppColors.white : AppColors.pampas),
         contentPadding: EdgeInsets.symmetric(
           horizontal: 15,
           vertical: maxLines == 1 ? 15 : 12,
@@ -784,6 +811,10 @@ class LpTextField extends StatelessWidget {
           borderSide: BorderSide(
             color: focused ? AppColors.tahitiGold : AppColors.westar,
           ),
+        ),
+        disabledBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(8),
+          borderSide: const BorderSide(color: AppColors.westar),
         ),
         focusedBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(8),

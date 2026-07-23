@@ -1,3 +1,5 @@
+import 'dart:async' show TimeoutException;
+
 /// Normalized error surface for all backend calls.
 ///
 /// Concrete [ApiClient] implementations should translate transport-specific
@@ -18,6 +20,11 @@ class ApiException implements Exception {
   bool get isUnauthorized => statusCode == 401 || statusCode == 403;
   bool get isNotFound => statusCode == 404;
   bool get isServerError => (statusCode ?? 0) >= 500;
+
+  /// True when the request never got a response in time (as opposed to a
+  /// socket/DNS failure) — lets callers show "the server is slow" instead of
+  /// a generic "can't connect" message.
+  bool get isTimeout => cause is TimeoutException;
 
   @override
   String toString() =>

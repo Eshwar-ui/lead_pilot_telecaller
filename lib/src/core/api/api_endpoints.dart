@@ -88,4 +88,11 @@ class ApiEndpoints {
 
   // Organization profile (Profile screen's org card)
   static const String orgProfile = '/api/auth/org';
+
+  // Device call-log sync (every inbound/outbound/missed call, not just calls
+  // placed through this app's own dialer button) — a sibling of /api/calls,
+  // not nested under it, so it can't collide with calls.py's
+  // GET /api/calls/{call_id} catch-all.
+  static const String callLogSync = '/api/call-log/sync';
+  static const String callLog = '/api/call-log';
 }

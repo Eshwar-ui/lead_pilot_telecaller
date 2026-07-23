@@ -99,11 +99,14 @@ List<CallLogEntry> mergeCallEntries(
   return changed ? list : current;
 }
 
-/// Two entries are the same call when they share a backend call_id, or (for
-/// a call not yet uploaded) they're for the same lead within a couple of
-/// minutes — enough to fuse the optimistic "recording found" entry with the
-/// confirmed backend-history entry for the same call.
+/// Two entries are the same call when they share a device call-log id, a
+/// backend call_id, or (for a call not yet uploaded) they're for the same
+/// lead within a couple of minutes — enough to fuse the optimistic "recording
+/// found" entry with the confirmed backend-history entry for the same call.
 bool _sameCall(CallLogEntry a, CallLogEntry b) {
+  if (a.deviceCallId != null && b.deviceCallId != null) {
+    return a.deviceCallId == b.deviceCallId;
+  }
   if (a.callId != null && b.callId != null) return a.callId == b.callId;
   return a.leadId != null &&
       a.leadId == b.leadId &&
@@ -114,6 +117,7 @@ bool _sameCall(CallLogEntry a, CallLogEntry b) {
 /// a non-zero duration all come from the confirmed backend copy.
 CallLogEntry _preferConfirmed(CallLogEntry existing, CallLogEntry incoming) {
   final callId = existing.callId ?? incoming.callId;
+  final deviceCallId = existing.deviceCallId ?? incoming.deviceCallId;
   final score = incoming.score > existing.score ? incoming.score : existing.score;
   final duration =
       incoming.duration > existing.duration ? incoming.duration : existing.duration;
@@ -122,6 +126,7 @@ CallLogEntry _preferConfirmed(CallLogEntry existing, CallLogEntry incoming) {
       ? incoming.calledAt
       : existing.calledAt;
   if (callId == existing.callId &&
+      deviceCallId == existing.deviceCallId &&
       score == existing.score &&
       duration == existing.duration &&
       calledAt == existing.calledAt) {
@@ -129,6 +134,7 @@ CallLogEntry _preferConfirmed(CallLogEntry existing, CallLogEntry incoming) {
   }
   return existing.copyWith(
     callId: callId,
+    deviceCallId: deviceCallId,
     score: score,
     duration: duration,
     calledAt: calledAt,

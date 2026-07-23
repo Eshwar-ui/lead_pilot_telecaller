@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
-# Launch the FastAPI "AI layer" backend (voicesummary-main) for the Flutter app.
-# Usage:  ./run_backend.sh        (from the lead_pilot_telecaller folder)
-# See RUNBOOK.md for one-time setup (Postgres, venv, deps, .env).
+# Launch the FastAPI backend (leadpilot-backend) for the Flutter app.
+# Usage:  ./run_backend.sh        (from the leadpilot-telecaller-app folder)
+# See RUNBOOK.md for one-time setup (venv, deps, .env).
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-BACKEND="$HERE/../voicesummary-main"
+BACKEND="$HERE/../leadpilot-backend"
 
 if [[ ! -d "$BACKEND" ]]; then
   echo "✗ Backend not found at: $BACKEND" >&2
@@ -13,11 +13,15 @@ if [[ ! -d "$BACKEND" ]]; then
 fi
 cd "$BACKEND"
 
-# Ensure Postgres is up (Homebrew Postgres 14).
-if command -v pg_isready >/dev/null 2>&1 && ! pg_isready -q; then
-  echo "→ Starting PostgreSQL…"
-  brew services start postgresql@14 >/dev/null 2>&1 || \
-    pg_ctl -D /opt/homebrew/var/postgresql@14 -l /tmp/pg14.log start || true
+# DATABASE_URL in .env defaults to the live Supabase DB, so local Postgres is NOT
+# required for the common case. This only matters if you've switched DATABASE_URL
+# to a local Postgres instance (see RUNBOOK.md §1a) — start it if so.
+if grep -q '^DATABASE_URL=postgresql://.*@localhost' .env 2>/dev/null; then
+  if command -v pg_isready >/dev/null 2>&1 && ! pg_isready -q; then
+    echo "→ Starting local PostgreSQL…"
+    brew services start postgresql@14 >/dev/null 2>&1 || \
+      pg_ctl -D /opt/homebrew/var/postgresql@14 -l /tmp/pg14.log start || true
+  fi
 fi
 
 if [[ ! -x ".venv/bin/python" ]]; then

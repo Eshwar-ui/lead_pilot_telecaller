@@ -10,6 +10,7 @@ import '../core/api/api_config.dart';
 import '../core/api/api_exception.dart';
 import '../core/api/http_api_client.dart';
 import '../data/attendance_repository.dart';
+import '../data/call_log_repository.dart';
 import '../data/follow_up_repository.dart';
 import '../data/lead_repository.dart';
 import '../data/mock_leads.dart';
@@ -19,6 +20,7 @@ import '../models/lead.dart';
 import '../services/local_call_store.dart';
 import '../services/local_follow_up_store.dart';
 import '../services/local_lead_override_store.dart';
+import '../services/native_call_log_service.dart';
 import '../services/session_store.dart';
 
 // ─── Backend wiring ───────────────────────────────────────────────────────────
@@ -59,9 +61,21 @@ class ServerReachabilityController extends Notifier<bool> {
   /// Called by [HttpApiClient] whenever a request gets any response below
   /// 500 — proof the server is up, whatever the request's own outcome.
   void markReachable() {
+    final wasUnreachable = !state;
     _retryTimer?.cancel();
     _retryTimer = null;
     if (!state) state = true;
+    // The banner clearing used to be the only signal — screens that had
+    // already fallen back to cached/mock data (inbox) or silently swallowed
+    // a failed fetch (follow-ups) just sat there stale until the user
+    // manually pulled to refresh. Re-fetch as soon as the server is proven
+    // reachable again so "banner gone" actually means "data is live".
+    if (wasUnreachable) _refreshAfterReconnect();
+  }
+
+  void _refreshAfterReconnect() {
+    unawaited(ref.read(leadsProvider.notifier).refresh());
+    unawaited(ref.read(followUpsProvider.notifier).refresh());
   }
 
   /// Called by [HttpApiClient] on a network-layer failure (timeout, socket
@@ -118,6 +132,11 @@ final attendanceRepositoryProvider = Provider<AttendanceRepository>(
 /// Talks to the follow-up endpoints.
 final followUpRepositoryProvider = Provider<FollowUpRepository>(
   (ref) => FollowUpRepository(ref.watch(apiClientProvider)),
+);
+
+/// Talks to the device-call-log sync endpoints.
+final callLogRepositoryProvider = Provider<CallLogRepository>(
+  (ref) => CallLogRepository(ref.watch(apiClientProvider)),
 );
 
 /// Talks to the org-profile endpoint.
@@ -471,16 +490,107 @@ class FollowUpController extends Notifier<List<FollowUpTask>> {
 
 /// Global call log. Reads ONLY the persisted [localCallsProvider], which holds
 /// calls this device has real evidence for (a recording was found for a call
-/// that ended) plus backend history that's been ingested for leads the
-/// telecaller actually opened. Backend history is no longer merged live off
-/// every enriched lead — that made calls appear merely because a lead was
-/// opened, and vanish again on restart (both reported bugs). Sorted
-/// newest-first.
+/// that ended), backend history that's been ingested for leads the telecaller
+/// actually opened, and — once [CallLogSyncController] has synced — every
+/// inbound/outbound/missed call from the device's real call log. Backend lead
+/// history is no longer merged live off every enriched lead — that made calls
+/// appear merely because a lead was opened, and vanish again on restart (both
+/// reported bugs). Sorted newest-first.
 final callLogProvider = Provider<List<CallLogEntry>>((ref) {
   final entries = [...ref.watch(localCallsProvider)];
   entries.sort((a, b) => b.calledAt.compareTo(a.calledAt));
   return entries;
 });
+
+/// State for [CallLogSyncController] — whether the device call-log permission
+/// has been checked/granted yet, and whether a sync is currently running.
+/// [checked] gates the Calls screen's permission-prompt card: false until the
+/// first check completes, so the prompt doesn't flash before we actually know.
+class CallLogSyncState {
+  const CallLogSyncState({
+    this.checked = false,
+    this.permissionGranted = false,
+    this.syncing = false,
+  });
+
+  final bool checked;
+  final bool permissionGranted;
+  final bool syncing;
+
+  CallLogSyncState copyWith({
+    bool? checked,
+    bool? permissionGranted,
+    bool? syncing,
+  }) => CallLogSyncState(
+    checked: checked ?? this.checked,
+    permissionGranted: permissionGranted ?? this.permissionGranted,
+    syncing: syncing ?? this.syncing,
+  );
+}
+
+final callLogSyncProvider =
+    NotifierProvider<CallLogSyncController, CallLogSyncState>(
+  CallLogSyncController.new,
+);
+
+/// Reads the device's native call log (every call, any app) and merges it
+/// into [localCallsProvider], then best-effort syncs the new entries to the
+/// backend. READ_CALL_LOG is only ever requested when the user explicitly
+/// opts in from the Calls screen (see [requestPermissionAndSync]) — never at
+/// app start — so the prompt appears in context, not as a surprise at login.
+class CallLogSyncController extends Notifier<CallLogSyncState> {
+  static const _lastSyncKey = 'native_call_log_last_sync_v1';
+  // First-ever sync looks back 90 days — matches the "Call Recordings: 90
+  // days" retention window already shown on the Profile screen, so the two
+  // numbers the telecaller sees agree with each other.
+  static const _firstSyncLookback = Duration(days: 90);
+
+  @override
+  CallLogSyncState build() {
+    Future.microtask(_checkPermission);
+    return const CallLogSyncState();
+  }
+
+  Future<void> _checkPermission() async {
+    final granted = await ref.read(nativeCallLogServiceProvider).hasPermission();
+    state = state.copyWith(checked: true, permissionGranted: granted);
+    if (granted) unawaited(sync());
+  }
+
+  /// Explicit user opt-in from the Calls screen's permission-prompt card.
+  Future<bool> requestPermissionAndSync() async {
+    final granted =
+        await ref.read(nativeCallLogServiceProvider).requestPermission();
+    state = state.copyWith(checked: true, permissionGranted: granted);
+    if (granted) await sync();
+    return granted;
+  }
+
+  Future<void> sync() async {
+    if (state.syncing || !state.permissionGranted) return;
+    state = state.copyWith(syncing: true);
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final lastMillis = prefs.getInt(_lastSyncKey);
+      final since = lastMillis != null
+          ? DateTime.fromMillisecondsSinceEpoch(lastMillis)
+          : DateTime.now().subtract(_firstSyncLookback);
+      final entries =
+          await ref.read(nativeCallLogServiceProvider).fetchSince(since);
+      if (entries.isNotEmpty) {
+        await ref.read(localCallsProvider.notifier).ingest(entries);
+        try {
+          await ref.read(callLogRepositoryProvider).sync(entries);
+        } catch (_) {
+          // Fail-soft — already merged locally; retried on the next sync.
+        }
+      }
+      await prefs.setInt(_lastSyncKey, DateTime.now().millisecondsSinceEpoch);
+    } finally {
+      state = state.copyWith(syncing: false);
+    }
+  }
+}
 
 /// Builds persist-able call-log entries from an enriched lead's backend call
 /// history (only calls with a real timestamp).

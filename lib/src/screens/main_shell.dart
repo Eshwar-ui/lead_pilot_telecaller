@@ -1,8 +1,12 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_app_utilities/flutter_app_utilities.dart' hide AppSpacing;
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../services/permission_bootstrap.dart';
+import '../state/call_capture.dart';
 import '../theme/app_colors.dart';
 import '../theme/app_theme.dart';
 import 'home_screen.dart';
@@ -10,14 +14,15 @@ import 'calls_screen.dart';
 import 'follow_ups_screen.dart';
 import 'profile_screen.dart';
 
-class MainShell extends StatefulWidget {
+class MainShell extends ConsumerStatefulWidget {
   const MainShell({super.key});
 
   @override
-  State<MainShell> createState() => _MainShellState();
+  ConsumerState<MainShell> createState() => _MainShellState();
 }
 
-class _MainShellState extends State<MainShell> {
+class _MainShellState extends ConsumerState<MainShell>
+    with WidgetsBindingObserver {
   int _tab = 0;
 
   /// Timestamp of the last "back" press while on the Inbox tab — used to
@@ -34,11 +39,33 @@ class _MainShellState extends State<MainShell> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     // Onboarding no longer runs before this screen, so request phone +
     // notification access here instead, as soon as the dashboard opens.
     WidgetsBinding.instance.addPostFrameCallback(
       (_) => PermissionBootstrap.requestStartup(),
     );
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    // PostCallScreen already retries its own outbox drain on resume, but that
+    // only fires while a PostCallScreen happens to be mounted. A telecaller
+    // who backgrounds the app mid-upload (e.g. switches to WhatsApp) and
+    // later reopens straight to the Inbox/Calls tab — never revisiting
+    // post-call — would otherwise leave that recording stuck in the outbox
+    // until they happen to open some call's post-call screen again. This
+    // shell wraps every screen for the app's whole lifetime, so draining here
+    // catches every resume regardless of which tab is showing.
+    if (state == AppLifecycleState.resumed) {
+      unawaited(ref.read(callCaptureProvider.notifier).drainOutbox());
+    }
   }
 
   /// Handles the Android system back button while the tab shell is showing.

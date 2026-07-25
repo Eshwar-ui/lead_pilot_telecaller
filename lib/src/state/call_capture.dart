@@ -160,7 +160,17 @@ class CallCaptureController extends Notifier<Map<String, CallCaptureState>> {
 
   /// Finds the recording the dialer saved for the call that just ended and
   /// stores it against [leadId]. Safe to call repeatedly (e.g. on resume).
-  Future<void> captureLatest(String leadId) async {
+  ///
+  /// [manual] marks an explicit user-initiated call (the "Retry" button),
+  /// as opposed to the automatic scan right after a call ends. The automatic
+  /// scan is deliberately bounded to a 30-minute-old file so it can't grab an
+  /// unrelated old recording — but that same bound made a manual retry
+  /// permanently unable to find a real recording once 30 minutes had passed
+  /// (e.g. while the user was troubleshooting permissions), no matter how
+  /// many times they tapped it. A manual retry searches with no recency
+  /// limit instead, matching findLatestRecording's own documented intent
+  /// for "a manual 'pick the latest recording' action".
+  Future<void> captureLatest(String leadId, {bool manual = false}) async {
     final service = ref.read(callRecordingServiceProvider);
     final existing = stateFor(leadId);
 
@@ -216,7 +226,10 @@ class CallCaptureController extends Notifier<Map<String, CallCaptureState>> {
     final phoneHint = matches.isEmpty ? null : matches.first.phone;
 
     try {
-      final recording = await service.findLatestRecording(phoneHint: phoneHint);
+      final recording = await service.findLatestRecording(
+        phoneHint: phoneHint,
+        within: manual ? null : const Duration(minutes: 30),
+      );
       if (recording == null) {
         _set(
           leadId,

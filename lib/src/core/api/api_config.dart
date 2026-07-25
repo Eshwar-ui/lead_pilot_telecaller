@@ -57,7 +57,7 @@ class ApiConfig {
   /// The active backend target. Pointed at a laptop-hosted FastAPI instance
   /// for local development — swap to [ApiEnvironment.prod] before shipping,
   /// once the deployed backend has this session's new code.
-  static const ApiEnvironment environment = ApiEnvironment.prod;
+  static const ApiEnvironment environment = ApiEnvironment.dev;
 
   static String get baseUrl => environment.baseUrl;
 

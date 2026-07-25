@@ -1685,7 +1685,7 @@ class _CallRecordingCard extends ConsumerWidget {
           bar([
             _RecordingActionButton(
               label: 'Retry',
-              onTap: () => notifier.captureLatest(leadId),
+              onTap: () => notifier.captureLatest(leadId, manual: true),
             ),
           ]),
         ];
@@ -1695,7 +1695,7 @@ class _CallRecordingCard extends ConsumerWidget {
             _RecordingActionButton(
               label: 'Grant access',
               filled: true,
-              onTap: () => notifier.captureLatest(leadId),
+              onTap: () => notifier.captureLatest(leadId, manual: true),
             ),
           ]),
         ];
@@ -1717,7 +1717,7 @@ class _CallRecordingCard extends ConsumerWidget {
               label: capture.hasRecording ? 'Retry transcription' : 'Retry',
               onTap: () => capture.hasRecording
                   ? notifier.transcribe(leadId)
-                  : notifier.captureLatest(leadId),
+                  : notifier.captureLatest(leadId, manual: true),
             ),
           ]),
         ];

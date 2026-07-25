@@ -1057,7 +1057,10 @@ class CallHistoryPanel extends StatelessWidget {
                             calledAt: history[i].calledAt,
                           ),
                         )
-                      : context.push('/leads/$leadId/post-call'),
+                      // No call_id yet means it was never captured/uploaded —
+                      // pass extra: true so this re-entry retries the scan
+                      // for the recording, same as the other post-call routes.
+                      : context.push('/leads/$leadId/post-call', extra: true),
                   child: Padding(
                     padding: const EdgeInsets.symmetric(
                       horizontal: 16,

@@ -12,6 +12,12 @@
     <uses-permission android:name="android.permission.READ_CALL_LOG" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+    <!-- Xiaomi/Oppo/Vivo-class OEM battery managers routinely kill the call
+         overlay/auto-return foreground service mid-call, which silently
+         breaks the whole auto-capture chain. Lets us ask the user to
+         whitelist the app from battery optimization (see MainActivity's
+         requestBatteryOptimizationExemptionIfNeeded). -->
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
 
     <!-- Read the audio file the device dialer saves after a call (auto-record).
          Android 11+ needs "All files access"; older devices use READ_EXTERNAL_STORAGE. -->

@@ -620,7 +620,10 @@ class CallNotesOverlayService : Service() {
     private fun openPostCallScreen() {
         if (leadId.isBlank()) return
         startActivity(Intent(Intent.ACTION_VIEW).apply {
-            data = Uri.parse("leadpilot://app/leads/$leadId/post-call")
+            // `?new=1` tells the router this is "just finished a call" so it
+            // triggers auto-capture even on a cold start (Dart `extra` can't
+            // survive a URI-only deep link into a killed process).
+            data = Uri.parse("leadpilot://app/leads/$leadId/post-call?new=1")
             setPackage(packageName)
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
         })

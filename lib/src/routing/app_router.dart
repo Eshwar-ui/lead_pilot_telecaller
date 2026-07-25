@@ -75,7 +75,14 @@ final appRouterProvider = Provider<GoRouter>((ref) {
         path: '/leads/:id/post-call',
         builder: (context, state) => PostCallScreen(
           leadId: state.pathParameters['id']!,
-          isNewCall: state.extra as bool? ?? false,
+          // `extra` covers in-app `context.push(..., extra: true)` navigation.
+          // The native call-overlay returns via a URI-only deep link (it can
+          // never carry Dart `extra`), especially on a cold start after the
+          // OS killed the app mid-call — so it flags the same intent with a
+          // `?new=1` query param instead. Either source means "just finished
+          // a call, go capture the recording".
+          isNewCall: (state.extra as bool?) ??
+              (state.uri.queryParameters['new'] == '1'),
         ),
       ),
       GoRoute(

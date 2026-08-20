@@ -5,7 +5,6 @@ import 'package:go_router/go_router.dart';
 import '../screens/add_outbound_lead_screen.dart';
 import '../screens/call_detail_screen.dart';
 import '../screens/change_password_screen.dart';
-import '../screens/dialer_screen.dart';
 import '../screens/lead_detail_screen.dart';
 import '../screens/login_screen.dart';
 import '../screens/main_shell.dart';
@@ -40,7 +39,8 @@ final appRouterProvider = Provider<GoRouter>((ref) {
         path: '/change-password-required',
         builder: (context, state) => ChangePasswordScreen(
           forced: true,
-          knownCurrentPassword: (state.extra as Map?)?['currentPassword'] as String?,
+          knownCurrentPassword:
+              (state.extra as Map?)?['currentPassword'] as String?,
         ),
       ),
       GoRoute(
@@ -67,11 +67,6 @@ final appRouterProvider = Provider<GoRouter>((ref) {
         builder: (context, state) => const NotificationsScreen(),
       ),
       GoRoute(
-        path: '/dialer/:id',
-        builder: (context, state) =>
-            DialerScreen(leadId: state.pathParameters['id']!),
-      ),
-      GoRoute(
         path: '/leads/:id/post-call',
         builder: (context, state) => PostCallScreen(
           leadId: state.pathParameters['id']!,
@@ -81,7 +76,8 @@ final appRouterProvider = Provider<GoRouter>((ref) {
           // OS killed the app mid-call — so it flags the same intent with a
           // `?new=1` query param instead. Either source means "just finished
           // a call, go capture the recording".
-          isNewCall: (state.extra as bool?) ??
+          isNewCall:
+              (state.extra as bool?) ??
               (state.uri.queryParameters['new'] == '1'),
         ),
       ),

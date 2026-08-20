@@ -59,11 +59,8 @@ extension LeadTemperatureX on LeadTemperature {
   /// Wire value used in API payloads, e.g. "hot".
   String get value => name;
 
-  static LeadTemperature fromValue(String? value) =>
-      LeadTemperature.values.firstWhere(
-        (e) => e.name == value,
-        orElse: () => LeadTemperature.cold,
-      );
+  static LeadTemperature fromValue(String? value) => LeadTemperature.values
+      .firstWhere((e) => e.name == value, orElse: () => LeadTemperature.cold);
 }
 
 extension LeadSourceX on LeadSource {
@@ -122,11 +119,14 @@ class Lead {
   final List<Objection> objections;
   final List<ChecklistItem> checklist;
   final List<CallRecord> history;
+
   /// Short topic shown in the lead tile timestamp, e.g. "Luxury Villas Search".
   final String? propertyInterest;
+
   /// The AI's one-line recommended next move for this lead, from the memory
   /// bubble's `next_call_strategy`. Empty when there's no history yet.
   final String nextStep;
+
   /// Promises the telecaller made that aren't fulfilled yet (memory bubble's
   /// `pending_commitments`) — shown as actionable "Next Steps" items.
   final List<String> pendingCommitments;
@@ -181,9 +181,10 @@ class Lead {
     history: _list(json['history'], CallRecord.fromJson),
     propertyInterest: json['property_interest'] as String?,
     nextStep: json['next_step'] as String? ?? '',
-    pendingCommitments: (json['pending_commitments'] as List<dynamic>? ?? const [])
-        .map((e) => e.toString())
-        .toList(),
+    pendingCommitments:
+        (json['pending_commitments'] as List<dynamic>? ?? const [])
+            .map((e) => e.toString())
+            .toList(),
   );
 
   Map<String, dynamic> toJson() => {
@@ -248,10 +249,9 @@ class AiScript {
   factory AiScript.fromJson(Map<String, dynamic> json) => AiScript(
     generatedAgo: json['generated_ago'] as String? ?? '',
     openingLine: json['opening_line'] as String? ?? '',
-    keyPoints:
-        (json['key_points'] as List<dynamic>? ?? [])
-            .map((e) => e as String)
-            .toList(),
+    keyPoints: (json['key_points'] as List<dynamic>? ?? [])
+        .map((e) => e as String)
+        .toList(),
     steps: _list(json['steps'], ScriptStep.fromJson),
   );
 
@@ -331,15 +331,19 @@ class CallRecord {
   final Duration duration;
   final int score;
   final DateTime? calledAt;
+
   /// ID of the associated [Lead] — used to build the global call log.
   final String? leadId;
+
   /// Backend `call_id` for this specific call. Null for a locally-placed call
   /// that hasn't been captured/uploaded yet — those have no stored transcript.
   final String? callId;
+
   /// Backend `telecaller_id` of whoever placed/uploaded this call. Used to keep
   /// only the signed-in telecaller's own calls in "My Calls" — so opening a
   /// lead that carries another user's (or an imported) call adds nothing.
   final String? placedBy;
+
   /// Real per-call sentiment — "positive" | "neutral" | "negative", or null
   /// when the call has no sentiment signal yet (not analyzed, or analysis
   /// failed). Backed by the backend's `call_sentiment_label()`, not a score
@@ -348,7 +352,9 @@ class CallRecord {
 
   factory CallRecord.fromJson(Map<String, dynamic> json) => CallRecord(
     title: json['title'] as String? ?? '',
-    duration: Duration(seconds: (json['duration_seconds'] as num?)?.toInt() ?? 0),
+    duration: Duration(
+      seconds: (json['duration_seconds'] as num?)?.toInt() ?? 0,
+    ),
     score: (json['score'] as num?)?.toInt() ?? 0,
     calledAt: json['called_at'] != null
         ? DateTime.tryParse(json['called_at'] as String)
@@ -379,11 +385,8 @@ extension FollowUpStatusX on FollowUpStatus {
   /// Wire value used in API payloads, e.g. "overdue".
   String get value => name;
 
-  static FollowUpStatus fromValue(String? value) =>
-      FollowUpStatus.values.firstWhere(
-        (e) => e.name == value,
-        orElse: () => FollowUpStatus.pending,
-      );
+  static FollowUpStatus fromValue(String? value) => FollowUpStatus.values
+      .firstWhere((e) => e.name == value, orElse: () => FollowUpStatus.pending);
 }
 
 class FollowUpTask {
@@ -405,16 +408,21 @@ class FollowUpTask {
   final String taskText;
   final String leadName;
   final String? phone;
+
   /// ID of the associated [Lead] — used for navigation to lead detail.
   final String? leadId;
   final FollowUpStatus status;
   final String? dueLabel;
+
   /// True when this task is due on today's date (used for tab filtering).
   final bool dueToday;
+
   /// When the follow-up is scheduled — null means unscheduled.
   final DateTime? scheduledAt;
+
   /// Optional telecaller note saved alongside the scheduled call.
   final String? note;
+
   /// The backend `FollowUp.id`, set once this task has synced to
   /// `/api/follow-ups`. Null means it only exists locally so far (created
   /// offline, or the initial sync call failed) — mark-done/delete then only
@@ -506,17 +514,21 @@ class CallLogEntry {
   final int score;
   final DateTime calledAt;
   final bool isInbound;
+
   /// Lead ID — used to navigate from call log to lead detail.
   final String? leadId;
+
   /// Backend `call_id` once the recording has been uploaded/transcribed. Null
   /// for a call only observed locally so far. Used as the stable identity when
   /// de-duplicating the persisted call log against backend history.
   final String? callId;
+
   /// The device's native call-log row id (from the `call_log` plugin), set
   /// only for entries read from the phone's real call history — used as the
   /// dedup/sync identity for those entries (a call placed through the app's
   /// own dialer has no device id until the OS call log catches up with it).
   final String? deviceCallId;
+
   /// Real per-call sentiment — "positive" | "neutral" | "negative", or null
   /// when there's no sentiment signal yet (not analyzed — including every
   /// device-call-log/native entry, which never has backend analysis at all).
@@ -556,7 +568,9 @@ class CallLogEntry {
     phone: json['phone'] as String? ?? '',
     intent: json['intent'] as String? ?? '',
     source: LeadSourceX.fromValue(json['source'] as String?),
-    duration: Duration(seconds: (json['duration_seconds'] as num?)?.toInt() ?? 0),
+    duration: Duration(
+      seconds: (json['duration_seconds'] as num?)?.toInt() ?? 0,
+    ),
     score: (json['score'] as num?)?.toInt() ?? 0,
     calledAt: _parseDate(json['called_at']),
     isInbound: json['is_inbound'] as bool? ?? false,
@@ -592,6 +606,7 @@ class OutboundLeadDraft {
     this.reason = '',
     this.source = '',
     this.hasDuplicate = false,
+    this.dedupeContactKey,
   });
 
   final String name;
@@ -600,19 +615,33 @@ class OutboundLeadDraft {
   final String source;
   final bool hasDuplicate;
 
+  /// contact_key of the existing lead this phone number already matches
+  /// (from the last `dedupe()` check) — where the "View existing lead" link
+  /// on the duplicate-warning banner navigates to.
+  final String? dedupeContactKey;
+
   OutboundLeadDraft copyWith({
     String? name,
     String? phone,
     String? reason,
     String? source,
     bool? hasDuplicate,
+    String? dedupeContactKey,
+
+    /// Resets [hasDuplicate]/[dedupeContactKey] regardless of the params
+    /// above — needed since a plain `?? this.x` copyWith can't express
+    /// "clear to null" for a nullable field.
+    bool clearDedupe = false,
   }) {
     return OutboundLeadDraft(
       name: name ?? this.name,
       phone: phone ?? this.phone,
       reason: reason ?? this.reason,
       source: source ?? this.source,
-      hasDuplicate: hasDuplicate ?? this.hasDuplicate,
+      hasDuplicate: clearDedupe ? false : (hasDuplicate ?? this.hasDuplicate),
+      dedupeContactKey: clearDedupe
+          ? null
+          : (dedupeContactKey ?? this.dedupeContactKey),
     );
   }
 
@@ -637,10 +666,7 @@ class OutboundLeadDraft {
 // ─── JSON helpers ─────────────────────────────────────────────────────────────
 
 /// Maps a JSON list (or null) into a typed list using [fromJson] per element.
-List<T> _list<T>(
-  Object? raw,
-  T Function(Map<String, dynamic>) fromJson,
-) {
+List<T> _list<T>(Object? raw, T Function(Map<String, dynamic>) fromJson) {
   if (raw is! List) return const [];
   return raw
       .whereType<Map<String, dynamic>>()

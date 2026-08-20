@@ -18,13 +18,18 @@ import '../widgets/leadpilot_widgets.dart';
 /// - [forced]=false: reached voluntarily from Profile. Shows a "Current
 ///   password" field the user must type themselves.
 class ChangePasswordScreen extends ConsumerStatefulWidget {
-  const ChangePasswordScreen({super.key, required this.forced, this.knownCurrentPassword});
+  const ChangePasswordScreen({
+    super.key,
+    required this.forced,
+    this.knownCurrentPassword,
+  });
 
   final bool forced;
   final String? knownCurrentPassword;
 
   @override
-  ConsumerState<ChangePasswordScreen> createState() => _ChangePasswordScreenState();
+  ConsumerState<ChangePasswordScreen> createState() =>
+      _ChangePasswordScreenState();
 }
 
 class _ChangePasswordScreenState extends ConsumerState<ChangePasswordScreen> {
@@ -34,8 +39,19 @@ class _ChangePasswordScreenState extends ConsumerState<ChangePasswordScreen> {
   bool _loading = false;
   String? _error;
 
+  /// Forced mode normally has the temp password silently on hand
+  /// ([knownCurrentPassword]), but a cold start or deep link into the forced
+  /// route (redirect carries no `extra`) loses it — fall back to asking, same
+  /// as voluntary mode, instead of showing a field-less screen the user can
+  /// never get past.
+  bool get _needsCurrentPasswordField =>
+      !widget.forced || widget.knownCurrentPassword == null;
+
   Future<void> _submit() async {
-    final currentPassword = widget.forced ? (widget.knownCurrentPassword ?? '') : _currentPassword;
+    final currentPassword =
+        (widget.forced && widget.knownCurrentPassword != null)
+        ? widget.knownCurrentPassword!
+        : _currentPassword;
     if (currentPassword.isEmpty || _newPassword.isEmpty) {
       setState(() => _error = 'Fill in all fields');
       return;
@@ -52,9 +68,21 @@ class _ChangePasswordScreenState extends ConsumerState<ChangePasswordScreen> {
       final client = ref.read(apiClientProvider);
       await client.post(
         '/api/auth/change-password',
-        body: {'current_password': currentPassword, 'new_password': _newPassword},
+        body: {
+          'current_password': currentPassword,
+          'new_password': _newPassword,
+        },
       );
-      await ref.read(sessionProvider.notifier).clearMustResetPassword();
+      // The password change itself already succeeded server-side at this
+      // point — a failure below only means the local "must reset" flag
+      // didn't clear, not that the password change failed. Don't let it fall
+      // into the generic catch below and tell the user to retry the change.
+      try {
+        await ref.read(sessionProvider.notifier).clearMustResetPassword();
+      } catch (_) {
+        // Non-fatal: the backend already knows the password changed, so the
+        // next login won't re-force this screen even if the local flag is stale.
+      }
       if (!mounted) return;
       context.go('/home');
     } on ApiException catch (e) {
@@ -66,7 +94,10 @@ class _ChangePasswordScreenState extends ConsumerState<ChangePasswordScreen> {
       });
     } catch (_) {
       if (!mounted) return;
-      setState(() => _error = 'Could not change password. Check your connection and try again.');
+      setState(
+        () => _error =
+            'Could not change password. Check your connection and try again.',
+      );
     } finally {
       if (mounted) setState(() => _loading = false);
     }
@@ -109,7 +140,7 @@ class _ChangePasswordScreenState extends ConsumerState<ChangePasswordScreen> {
                     ),
                     const AppGap.lg(),
                   ],
-                  if (!widget.forced) ...[
+                  if (_needsCurrentPasswordField) ...[
                     FormShell(
                       label: 'Current Password',
                       required: true,
@@ -142,7 +173,10 @@ class _ChangePasswordScreenState extends ConsumerState<ChangePasswordScreen> {
                   ),
                   if (_error != null) ...[
                     const AppGap.sm(),
-                    Text(_error!, style: AppText.body14.copyWith(color: AppColors.alizarin)),
+                    Text(
+                      _error!,
+                      style: AppText.body14.copyWith(color: AppColors.alizarin),
+                    ),
                   ],
                   const AppGap.lg(),
                   PrimaryButton(

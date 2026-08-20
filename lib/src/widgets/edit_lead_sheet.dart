@@ -82,14 +82,16 @@ class _EditLeadSheetState extends ConsumerState<EditLeadSheet> {
     if (localDigits.length != 10) {
       ScaffoldMessenger.of(context)
         ..clearSnackBars()
-        ..showSnackBar(const SnackBar(
-          content: Text('Enter a valid 10-digit phone number'),
-        ));
+        ..showSnackBar(
+          const SnackBar(content: Text('Enter a valid 10-digit phone number')),
+        );
       return;
     }
     setState(() => _saving = true);
     try {
-      await ref.read(leadsProvider.notifier).updateLead(
+      await ref
+          .read(leadsProvider.notifier)
+          .updateLead(
             widget.lead.id,
             LeadOverride(
               name: _name.text.trim(),
@@ -100,6 +102,14 @@ class _EditLeadSheetState extends ConsumerState<EditLeadSheet> {
             ),
           );
       if (mounted) Navigator.of(context).pop();
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+          ..clearSnackBars()
+          ..showSnackBar(
+            const SnackBar(content: Text('Could not save changes. Try again.')),
+          );
+      }
     } finally {
       if (mounted) setState(() => _saving = false);
     }
@@ -193,10 +203,7 @@ class _EditLeadSheetState extends ConsumerState<EditLeadSheet> {
 }
 
 class _Field extends StatelessWidget {
-  const _Field({
-    required this.label,
-    required this.controller,
-  });
+  const _Field({required this.label, required this.controller});
 
   final String label;
   final TextEditingController controller;
@@ -221,8 +228,10 @@ class _Field extends StatelessWidget {
             isDense: true,
             filled: true,
             fillColor: AppColors.pampas,
-            contentPadding:
-                const EdgeInsets.symmetric(horizontal: AppSpacing.md, vertical: AppSpacing.md),
+            contentPadding: const EdgeInsets.symmetric(
+              horizontal: AppSpacing.md,
+              vertical: AppSpacing.md,
+            ),
             enabledBorder: OutlineInputBorder(
               borderRadius: BorderRadius.circular(AppRadius.sm),
               borderSide: const BorderSide(color: AppColors.westar),
@@ -262,9 +271,14 @@ class _StatusField extends StatelessWidget {
         child: DropdownButton<String>(
           value: value,
           isExpanded: true,
-          hint: Text('Select status',
-              style: AppText.body14.copyWith(color: AppColors.schooner)),
-          icon: const Icon(Icons.keyboard_arrow_down, color: AppColors.schooner),
+          hint: Text(
+            'Select status',
+            style: AppText.body14.copyWith(color: AppColors.schooner),
+          ),
+          icon: const Icon(
+            Icons.keyboard_arrow_down,
+            color: AppColors.schooner,
+          ),
           style: AppText.body14.copyWith(color: AppColors.zeus),
           borderRadius: BorderRadius.circular(AppRadius.md),
           items: [
@@ -299,7 +313,10 @@ class _SourceField extends StatelessWidget {
         child: DropdownButton<LeadSource>(
           value: value,
           isExpanded: true,
-          icon: const Icon(Icons.keyboard_arrow_down, color: AppColors.schooner),
+          icon: const Icon(
+            Icons.keyboard_arrow_down,
+            color: AppColors.schooner,
+          ),
           style: AppText.body14.copyWith(color: AppColors.zeus),
           borderRadius: BorderRadius.circular(AppRadius.md),
           items: [
@@ -330,20 +347,20 @@ class _TempChip extends StatelessWidget {
   Widget build(BuildContext context) {
     final (fg, bg, border) = switch (temperature) {
       LeadTemperature.hot => (
-          AppColors.alizarin,
-          AppColors.redSurface,
-          AppColors.redBorder
-        ),
+        AppColors.alizarin,
+        AppColors.redSurface,
+        AppColors.redBorder,
+      ),
       LeadTemperature.warm => (
-          AppColors.tahitiGold,
-          AppColors.warningSurface,
-          AppColors.warningBorder
-        ),
+        AppColors.tahitiGold,
+        AppColors.warningSurface,
+        AppColors.warningBorder,
+      ),
       LeadTemperature.cold => (
-          AppColors.schooner,
-          AppColors.pampas,
-          AppColors.westar
-        ),
+        AppColors.schooner,
+        AppColors.pampas,
+        AppColors.westar,
+      ),
     };
     return GestureDetector(
       onTap: onTap,
@@ -353,7 +370,10 @@ class _TempChip extends StatelessWidget {
         decoration: BoxDecoration(
           color: selected ? bg : AppColors.white,
           borderRadius: BorderRadius.circular(AppRadius.md),
-          border: Border.all(color: selected ? fg : border, width: selected ? 1.5 : 1),
+          border: Border.all(
+            color: selected ? fg : border,
+            width: selected ? 1.5 : 1,
+          ),
         ),
         child: Text(
           temperature.name,

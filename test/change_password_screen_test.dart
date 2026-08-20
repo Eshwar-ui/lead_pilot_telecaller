@@ -27,6 +27,26 @@ void main() {
     expect(findLabel('Confirm New Password'), findsOneWidget);
   });
 
+  // Regression cover for the forced-mode dead end: a cold start or deep link
+  // into `/change-password-required` loses `knownCurrentPassword` (the
+  // router's redirect carries no `extra`), and forced mode used to hide the
+  // current-password field unconditionally — leaving the user on a screen
+  // with no way to enter their temp password and no back button.
+  testWidgets('forced mode with no known current password falls back to asking for it',
+      (tester) async {
+    await tester.pumpWidget(
+      const ProviderScope(
+        child: MaterialApp(
+          home: ChangePasswordScreen(forced: true, knownCurrentPassword: null),
+        ),
+      ),
+    );
+    await tester.pump();
+
+    expect(find.text('Set a New Password'), findsOneWidget);
+    expect(findLabel('Current Password'), findsOneWidget);
+  });
+
   testWidgets('voluntary mode shows the current-password field', (tester) async {
     await tester.pumpWidget(
       const ProviderScope(

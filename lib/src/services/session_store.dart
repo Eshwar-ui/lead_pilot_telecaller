@@ -57,7 +57,10 @@ class SessionController extends Notifier<Session> {
   }
 
   /// Called after a successful `POST /api/auth/login` with the raw response.
-  Future<void> setSession({required String token, required Map<String, dynamic> user}) async {
+  Future<void> setSession({
+    required String token,
+    required Map<String, dynamic> user,
+  }) async {
     await _storage.write(key: _tokenKey, value: token);
     await _storage.write(key: _userKey, value: jsonEncode(user));
     state = _sessionFrom(token, user);
@@ -81,23 +84,31 @@ class SessionController extends Notifier<Session> {
   /// Called after a successful `POST /api/auth/change-password` so the
   /// session's `mustResetPassword` clears without a full logout/re-login.
   Future<void> clearMustResetPassword() async {
+    // Read the token fresh from storage rather than trusting `state.token!` —
+    // a concurrent force-logout (401 elsewhere) can clear storage between
+    // this call starting and finishing, and force-unwrapping a cleared token
+    // would throw instead of just no-op'ing like the rest of this method.
+    final token = await _storage.read(key: _tokenKey);
     final userJson = await _storage.read(key: _userKey);
-    if (userJson == null) return;
+    if (token == null || userJson == null) return;
     final user = jsonDecode(userJson) as Map<String, dynamic>;
     user['must_reset_password'] = false;
     await _storage.write(key: _userKey, value: jsonEncode(user));
-    state = _sessionFrom(state.token!, user);
+    state = _sessionFrom(token, user);
   }
 
-  static Session _sessionFrom(String token, Map<String, dynamic> user) => Session(
-    token: token,
-    userId: user['id'] as String?,
-    name: user['name'] as String?,
-    email: user['email'] as String?,
-    role: user['role'] as String?,
-    orgName: user['org_name'] as String?,
-    mustResetPassword: user['must_reset_password'] as bool? ?? false,
-  );
+  static Session _sessionFrom(String token, Map<String, dynamic> user) =>
+      Session(
+        token: token,
+        userId: user['id'] as String?,
+        name: user['name'] as String?,
+        email: user['email'] as String?,
+        role: user['role'] as String?,
+        orgName: user['org_name'] as String?,
+        mustResetPassword: user['must_reset_password'] as bool? ?? false,
+      );
 }
 
-final sessionProvider = NotifierProvider<SessionController, Session>(SessionController.new);
+final sessionProvider = NotifierProvider<SessionController, Session>(
+  SessionController.new,
+);

@@ -97,6 +97,23 @@ void main() {
       expect(out, hasLength(2), reason: 'distinct device ids must never fuse');
     });
 
+    test('two distinct optimistic recordings to the same lead within the merge '
+        'window (e.g. a quick no-answer redial) stay distinct — neither has a '
+        'call_id yet, so a plain lead+time fuzzy match would wrongly fuse them', () {
+      final firstAttempt = entry(id: 'lead1_1000', at: DateTime(2026, 7, 15, 10, 30));
+      final redial = entry(id: 'lead1_2000', at: DateTime(2026, 7, 15, 10, 31));
+      final out = mergeCallEntries([firstAttempt], [redial]);
+      expect(out, hasLength(2), reason: 'two real calls must not collapse into one');
+    });
+
+    test('re-ingesting the exact same optimistic entry (same id, no call_id) '
+        'is still idempotent', () {
+      final optimistic = entry(id: 'lead1_1000', at: DateTime(2026, 7, 15, 10, 30));
+      final resent = entry(id: 'lead1_1000', at: DateTime(2026, 7, 15, 10, 30));
+      final out = mergeCallEntries([optimistic], [resent]);
+      expect(out, hasLength(1));
+    });
+
     test('backend sentiment survives fusing with an earlier sentiment-less '
         'optimistic entry', () {
       final optimistic = entry(id: 'a', at: DateTime(2026, 7, 15, 10, 30));

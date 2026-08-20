@@ -35,13 +35,15 @@ class LocalCallStore {
   }
 }
 
-final localCallStoreProvider = Provider<LocalCallStore>((_) => LocalCallStore());
+final localCallStoreProvider = Provider<LocalCallStore>(
+  (_) => LocalCallStore(),
+);
 
 /// Reactive list of locally-recorded calls (newest first).
 final localCallsProvider =
     NotifierProvider<LocalCallsController, List<CallLogEntry>>(
-  LocalCallsController.new,
-);
+      LocalCallsController.new,
+    );
 
 class LocalCallsController extends Notifier<List<CallLogEntry>> {
   @override
@@ -99,18 +101,28 @@ List<CallLogEntry> mergeCallEntries(
   return changed ? list : current;
 }
 
-/// Two entries are the same call when they share a device call-log id, a
-/// backend call_id, or (for a call not yet uploaded) they're for the same
-/// lead within a couple of minutes — enough to fuse the optimistic "recording
-/// found" entry with the confirmed backend-history entry for the same call.
+/// Two entries are the same call when they share a device call-log id or a
+/// backend call_id. When only one side has a call_id yet, fuse by lead+time
+/// window — that's the optimistic "recording found" entry being reconciled
+/// with the now-confirmed backend-history entry for the same call. When
+/// NEITHER side has a call_id, don't fuzzy-match by lead+time: two genuinely
+/// distinct calls to the same lead placed within the window (e.g. a quick
+/// no-answer redial) would otherwise silently fuse into one before either
+/// gets its own call_id back from the backend. Fall back to exact id
+/// equality instead — safe because the id embeds the recording's own
+/// timestamp, so two different recordings never collide, while re-ingesting
+/// the same one (e.g. a retried scan) is idempotent.
 bool _sameCall(CallLogEntry a, CallLogEntry b) {
   if (a.deviceCallId != null && b.deviceCallId != null) {
     return a.deviceCallId == b.deviceCallId;
   }
   if (a.callId != null && b.callId != null) return a.callId == b.callId;
-  return a.leadId != null &&
-      a.leadId == b.leadId &&
-      a.calledAt.difference(b.calledAt).inMinutes.abs() <= 2;
+  if ((a.callId != null) != (b.callId != null)) {
+    return a.leadId != null &&
+        a.leadId == b.leadId &&
+        a.calledAt.difference(b.calledAt).inMinutes.abs() <= 2;
+  }
+  return a.id == b.id;
 }
 
 /// When merging, keep the richer data: a real call_id, a positive score and
@@ -118,9 +130,12 @@ bool _sameCall(CallLogEntry a, CallLogEntry b) {
 CallLogEntry _preferConfirmed(CallLogEntry existing, CallLogEntry incoming) {
   final callId = existing.callId ?? incoming.callId;
   final deviceCallId = existing.deviceCallId ?? incoming.deviceCallId;
-  final score = incoming.score > existing.score ? incoming.score : existing.score;
-  final duration =
-      incoming.duration > existing.duration ? incoming.duration : existing.duration;
+  final score = incoming.score > existing.score
+      ? incoming.score
+      : existing.score;
+  final duration = incoming.duration > existing.duration
+      ? incoming.duration
+      : existing.duration;
   // Sentiment only ever comes from a backend-analyzed call — a device-log or
   // optimistic entry never has one, so whichever side has it wins.
   final sentiment = existing.sentiment ?? incoming.sentiment;
@@ -143,7 +158,9 @@ CallLogEntry _preferConfirmed(CallLogEntry existing, CallLogEntry incoming) {
     duration: duration,
     sentiment: sentiment,
     calledAt: calledAt,
-    leadName: incoming.leadName.isNotEmpty ? incoming.leadName : existing.leadName,
+    leadName: incoming.leadName.isNotEmpty
+        ? incoming.leadName
+        : existing.leadName,
     phone: incoming.phone.isNotEmpty ? incoming.phone : existing.phone,
   );
 }

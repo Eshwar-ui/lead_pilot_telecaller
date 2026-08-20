@@ -20,6 +20,7 @@ class HttpApiClient implements ApiClient {
     this.getToken,
     this.onConnectivityOk,
     this.onConnectivityIssue,
+    this.onUnauthorized,
   }) : _client = client ?? http.Client();
 
   final http.Client _client;
@@ -51,6 +52,17 @@ class HttpApiClient implements ApiClient {
   /// (5xx) — as opposed to a normal 4xx application error, which still
   /// proves connectivity.
   final void Function()? onConnectivityIssue;
+
+  /// Called when a request that *carried a bearer token* comes back 401 —
+  /// i.e. a previously-valid session's token has been rejected (expired,
+  /// signing-secret rotated on the backend, etc.), as opposed to a login
+  /// attempt with no token yet or a wrong-password 401 from `/api/auth/login`
+  /// (neither of those carries a token, so neither fires this). Lets the app
+  /// force a clean logout instead of leaving a dead token in place forever —
+  /// individual screens otherwise either surface a raw "expired" error
+  /// (Attendance) or silently fall back to stale/mock data (Leads) with no
+  /// way to recover short of the user manually logging out.
+  final void Function()? onUnauthorized;
 
   @override
   Future<dynamic> get(String path, {Map<String, dynamic>? query}) =>
@@ -103,6 +115,9 @@ class HttpApiClient implements ApiClient {
         onConnectivityOk?.call();
       } else {
         onConnectivityIssue?.call();
+      }
+      if (response.statusCode == 401 && token != null) {
+        onUnauthorized?.call();
       }
       return _decode(response, method, path);
     } on TimeoutException catch (e) {

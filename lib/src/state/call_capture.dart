@@ -105,7 +105,8 @@ final callRecordingServiceProvider = Provider<CallRecordingService>(
 );
 
 final transcriptionServiceProvider = Provider<TranscriptionService>(
-  (ref) => TranscriptionService(getToken: () => ref.read(sessionProvider).token),
+  (ref) =>
+      TranscriptionService(getToken: () => ref.read(sessionProvider).token),
 );
 
 /// Drives capturing the dialer's recording and turning it into a transcript,
@@ -144,17 +145,12 @@ class CallCaptureController extends Notifier<Map<String, CallCaptureState>> {
       return;
     }
 
-    final saved = await ref
-        .read(localTranscriptStoreProvider)
-        .load(leadId);
+    final saved = await ref.read(localTranscriptStoreProvider).load(leadId);
     if (saved == null) return;
 
     _set(
       leadId,
-      CallCaptureState(
-        status: CaptureStatus.transcribed,
-        transcription: saved,
-      ),
+      CallCaptureState(status: CaptureStatus.transcribed, transcription: saved),
     );
   }
 
@@ -208,7 +204,8 @@ class CallCaptureController extends Notifier<Map<String, CallCaptureState>> {
           leadId,
           existing.copyWith(
             status: CaptureStatus.permissionBlocked,
-            message: 'Enable "All files access" in Settings to read recordings.',
+            message:
+                'Enable "All files access" in Settings to read recordings.',
           ),
         );
         return;
@@ -235,7 +232,8 @@ class CallCaptureController extends Notifier<Map<String, CallCaptureState>> {
           leadId,
           existing.copyWith(
             status: CaptureStatus.notFound,
-            message: 'No recent recording found. Is auto-record on in your '
+            message:
+                'No recent recording found. Is auto-record on in your '
                 'dialer?',
           ),
         );
@@ -249,17 +247,23 @@ class CallCaptureController extends Notifier<Map<String, CallCaptureState>> {
       // evidence, unlike merely opening the dialer). It later merges with the
       // transcribed backend entry for the same call once the lead is enriched.
       final loggedLead = matches.isEmpty ? null : matches.first;
-      unawaited(ref.read(localCallsProvider.notifier).record(CallLogEntry(
-            id: '${leadId}_${recording.recordedAt.millisecondsSinceEpoch}',
-            leadName: loggedLead?.name ?? '',
-            phone: loggedLead?.phone ?? '',
-            intent: loggedLead?.intent ?? '',
-            source: loggedLead?.source ?? LeadSource.organic,
-            duration: Duration.zero,
-            score: loggedLead?.score ?? 0,
-            calledAt: recording.recordedAt,
-            leadId: leadId,
-          )));
+      unawaited(
+        ref
+            .read(localCallsProvider.notifier)
+            .record(
+              CallLogEntry(
+                id: '${leadId}_${recording.recordedAt.millisecondsSinceEpoch}',
+                leadName: loggedLead?.name ?? '',
+                phone: loggedLead?.phone ?? '',
+                intent: loggedLead?.intent ?? '',
+                source: loggedLead?.source ?? LeadSource.organic,
+                duration: Duration.zero,
+                score: loggedLead?.score ?? 0,
+                calledAt: recording.recordedAt,
+                leadId: leadId,
+              ),
+            ),
+      );
       // Auto-start transcription immediately — no manual tap required.
       unawaited(transcribe(leadId));
     } catch (e) {
@@ -343,11 +347,16 @@ class CallCaptureController extends Notifier<Map<String, CallCaptureState>> {
             existingCallId: existingCallId,
             onCallId: (id) => unawaited(ledger.remember(recording, id)),
             onProgress: (stage, percent) {
+              final prior = stateFor(leadId).processingPercent ?? 0;
               _set(
                 leadId,
                 stateFor(leadId).copyWith(
                   processingLabel: _stageLabel(stage),
-                  processingPercent: percent,
+                  // The backend's stages don't share one continuous scale (a
+                  // later stage's first tick can report a lower percent than
+                  // the previous stage's last one), so clamp to monotonic —
+                  // otherwise the progress bar visibly jumps backward.
+                  processingPercent: percent > prior ? percent : prior,
                 ),
               );
             },
@@ -369,15 +378,21 @@ class CallCaptureController extends Notifier<Map<String, CallCaptureState>> {
       // Queue the recording for automatic retry (survives app kill / offline),
       // so a failed upload isn't lost the moment the user leaves this screen.
       // The dedup ledger + backend content-hash guard make the retry idempotent.
-      unawaited(ref.read(localUploadOutboxProvider).enqueue(OutboxEntry(
-        leadId: leadId,
-        path: recording.path,
-        name: lead?.name,
-        phone: lead?.phone,
-        source: lead?.source.name,
-        contactKey: leadId,
-        callDateIso: recording.recordedAt.toIso8601String(),
-      )));
+      unawaited(
+        ref
+            .read(localUploadOutboxProvider)
+            .enqueue(
+              OutboxEntry(
+                leadId: leadId,
+                path: recording.path,
+                name: lead?.name,
+                phone: lead?.phone,
+                source: lead?.source.name,
+                contactKey: leadId,
+                callDateIso: recording.recordedAt.toIso8601String(),
+              ),
+            ),
+      );
       _set(
         leadId,
         current.copyWith(
@@ -388,39 +403,64 @@ class CallCaptureController extends Notifier<Map<String, CallCaptureState>> {
     }
   }
 
+  /// True while [drainOutbox] is running — guards against two concurrent
+  /// drains (e.g. PostCallScreen's own resume-retry and MainShell's lifecycle
+  /// hook both firing on the same resume) racing to read the same pending
+  /// entries and each uploading them, which only the backend's content-hash
+  /// dedup would catch after the fact.
+  bool _drainingOutbox = false;
+
   /// Best-effort background retry of every recording queued by a previous failed
   /// upload. Call on app resume. Each entry is retried once per drain; a success
   /// removes it, a failure bumps its attempt count (and drops it after the
   /// outbox's max attempts). Fail-soft: any error just leaves the entry queued.
   Future<void> drainOutbox() async {
-    final outbox = ref.read(localUploadOutboxProvider);
-    final pending = await outbox.all();
-    for (final entry in pending) {
-      final file = File(entry.path);
-      if (!file.existsSync()) {
-        // The dialer deleted the recording — nothing to retry, stop tracking it.
-        await outbox.remove(entry.path);
-        continue;
+    if (_drainingOutbox) return;
+    _drainingOutbox = true;
+    try {
+      final outbox = ref.read(localUploadOutboxProvider);
+      final pending = await outbox.all();
+      for (final entry in pending) {
+        final file = File(entry.path);
+        if (!file.existsSync()) {
+          // The dialer deleted the recording — nothing to retry, stop tracking it.
+          await outbox.remove(entry.path);
+          continue;
+        }
+        final CallRecording recording;
+        try {
+          // `statSync()` inside `fromFile` races the dialer/OS deleting the
+          // file between the `existsSync()` check above and here — without
+          // this try/catch that throws out of the whole loop, silently
+          // abandoning every other queued entry for this drain cycle.
+          recording = CallRecording.fromFile(file);
+        } catch (_) {
+          await outbox.remove(entry.path);
+          continue;
+        }
+        final ledger = ref.read(localUploadLedgerProvider);
+        final existingCallId = await ledger.callIdFor(recording);
+        try {
+          await ref
+              .read(transcriptionServiceProvider)
+              .transcribe(
+                recording: recording,
+                leadId: entry.leadId,
+                name: entry.name,
+                phone: entry.phone,
+                source: entry.source,
+                contactKey: entry.contactKey ?? entry.leadId,
+                existingCallId: existingCallId,
+                onCallId: (id) => unawaited(ledger.remember(recording, id)),
+              );
+          await outbox.remove(entry.path);
+          unawaited(ref.read(leadsProvider.notifier).enrich(entry.leadId));
+        } catch (e) {
+          await outbox.markFailure(entry.path, '$e');
+        }
       }
-      final recording = CallRecording.fromFile(file);
-      final ledger = ref.read(localUploadLedgerProvider);
-      final existingCallId = await ledger.callIdFor(recording);
-      try {
-        await ref.read(transcriptionServiceProvider).transcribe(
-              recording: recording,
-              leadId: entry.leadId,
-              name: entry.name,
-              phone: entry.phone,
-              source: entry.source,
-              contactKey: entry.contactKey ?? entry.leadId,
-              existingCallId: existingCallId,
-              onCallId: (id) => unawaited(ledger.remember(recording, id)),
-            );
-        await outbox.remove(entry.path);
-        unawaited(ref.read(leadsProvider.notifier).enrich(entry.leadId));
-      } catch (e) {
-        await outbox.markFailure(entry.path, '$e');
-      }
+    } finally {
+      _drainingOutbox = false;
     }
   }
 }

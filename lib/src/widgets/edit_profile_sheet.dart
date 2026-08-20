@@ -57,14 +57,28 @@ class _EditProfileSheetState extends ConsumerState<EditProfileSheet> {
       return;
     }
     setState(() => _saving = true);
-    await ref.read(userProfileProvider.notifier).update(
-          widget.profile.copyWith(
-            name: _name.text.trim(),
-            role: _role.text.trim(),
-            company: _company.text.trim(),
-          ),
-        );
-    if (mounted) Navigator.of(context).pop();
+    try {
+      await ref
+          .read(userProfileProvider.notifier)
+          .update(
+            widget.profile.copyWith(
+              name: _name.text.trim(),
+              role: _role.text.trim(),
+              company: _company.text.trim(),
+            ),
+          );
+      if (mounted) Navigator.of(context).pop();
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+          ..clearSnackBars()
+          ..showSnackBar(
+            const SnackBar(content: Text('Could not save profile. Try again.')),
+          );
+      }
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
   }
 
   @override
@@ -102,9 +116,10 @@ class _EditProfileSheetState extends ConsumerState<EditProfileSheet> {
           SizedBox(
             width: double.infinity,
             child: PrimaryButton(
-              label: _saving ? 'Saving…' : 'Save profile',
+              label: 'Save profile',
               icon: Icons.check,
-              onTap: _saving ? () {} : _save,
+              onTap: _save,
+              loading: _saving,
             ),
           ),
         ],
@@ -139,8 +154,10 @@ class _Field extends StatelessWidget {
             isDense: true,
             filled: true,
             fillColor: AppColors.pampas,
-            contentPadding:
-                const EdgeInsets.symmetric(horizontal: 15, vertical: 14),
+            contentPadding: const EdgeInsets.symmetric(
+              horizontal: 15,
+              vertical: 14,
+            ),
             enabledBorder: OutlineInputBorder(
               borderRadius: BorderRadius.circular(8),
               borderSide: const BorderSide(color: AppColors.westar),

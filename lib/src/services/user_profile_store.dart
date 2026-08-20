@@ -36,30 +36,29 @@ class UserProfile {
     String? company,
     String? language,
     bool? notificationsEnabled,
-  }) =>
-      UserProfile(
-        name: name ?? this.name,
-        role: role ?? this.role,
-        company: company ?? this.company,
-        language: language ?? this.language,
-        notificationsEnabled: notificationsEnabled ?? this.notificationsEnabled,
-      );
+  }) => UserProfile(
+    name: name ?? this.name,
+    role: role ?? this.role,
+    company: company ?? this.company,
+    language: language ?? this.language,
+    notificationsEnabled: notificationsEnabled ?? this.notificationsEnabled,
+  );
 
   factory UserProfile.fromJson(Map<String, dynamic> j) => UserProfile(
-        name: j['name'] as String? ?? 'Telecaller',
-        role: j['role'] as String? ?? 'Telecaller',
-        company: j['company'] as String? ?? '',
-        language: j['language'] as String? ?? 'తె',
-        notificationsEnabled: j['notifications_enabled'] as bool? ?? true,
-      );
+    name: j['name'] as String? ?? 'Telecaller',
+    role: j['role'] as String? ?? 'Telecaller',
+    company: j['company'] as String? ?? '',
+    language: j['language'] as String? ?? 'తె',
+    notificationsEnabled: j['notifications_enabled'] as bool? ?? true,
+  );
 
   Map<String, dynamic> toJson() => {
-        'name': name,
-        'role': role,
-        'company': company,
-        'language': language,
-        'notifications_enabled': notificationsEnabled,
-      };
+    'name': name,
+    'role': role,
+    'company': company,
+    'language': language,
+    'notifications_enabled': notificationsEnabled,
+  };
 }
 
 class UserProfileStore {
@@ -82,41 +81,58 @@ class UserProfileStore {
   }
 }
 
-final userProfileStoreProvider =
-    Provider<UserProfileStore>((_) => UserProfileStore());
+final userProfileStoreProvider = Provider<UserProfileStore>(
+  (_) => UserProfileStore(),
+);
 
 final userProfileProvider =
     NotifierProvider<UserProfileController, UserProfile>(
-  UserProfileController.new,
-);
+      UserProfileController.new,
+    );
 
 class UserProfileController extends Notifier<UserProfile> {
   @override
   UserProfile build() {
     _load();
+    // Re-seed whenever the session changes, not just once at boot —
+    // `_load()`'s original one-time read raced `SessionController._restore()`
+    // (both fire on cold start), so a profile loaded before the session
+    // finished restoring would seed from an empty session and never
+    // self-correct for the rest of the run. Listening here covers restore
+    // completing, login, and logout, all with the same idempotent logic.
+    ref.listen(sessionProvider, (previous, next) => _reseedFromSession(next));
     return const UserProfile();
   }
 
   Future<void> _load() async {
     final stored = await ref.read(userProfileStoreProvider).load();
-    final session = ref.read(sessionProvider);
-    // Seed identity from the authenticated session when the user hasn't
-    // personalised their profile yet (still the "Telecaller" placeholder), so
-    // the card shows who they actually logged in as — not a default. Once the
-    // user edits their profile, their chosen values win.
+    state = stored;
+    _reseedFromSession(ref.read(sessionProvider));
+  }
+
+  /// Seed identity from the authenticated session when the user hasn't
+  /// personalised their profile yet (still the "Telecaller" placeholder), so
+  /// the card shows who they actually logged in as — not a default. Once the
+  /// user edits their profile, their chosen values win. A no-op on logout
+  /// (session fields all empty, so every `isNotEmpty` check is false).
+  void _reseedFromSession(Session session) {
     final sessionName = session.name?.trim() ?? '';
     final sessionRole = _prettyRole(session.role);
     final sessionCompany = session.orgName?.trim() ?? '';
-    state = stored.copyWith(
-      name: (stored.name.isEmpty || stored.name == 'Telecaller') && sessionName.isNotEmpty
+    state = state.copyWith(
+      name:
+          (state.name.isEmpty || state.name == 'Telecaller') &&
+              sessionName.isNotEmpty
           ? sessionName
-          : stored.name,
-      role: (stored.role.isEmpty || stored.role == 'Telecaller') && sessionRole.isNotEmpty
+          : state.name,
+      role:
+          (state.role.isEmpty || state.role == 'Telecaller') &&
+              sessionRole.isNotEmpty
           ? sessionRole
-          : stored.role,
-      company: stored.company.isEmpty && sessionCompany.isNotEmpty
+          : state.role,
+      company: state.company.isEmpty && sessionCompany.isNotEmpty
           ? sessionCompany
-          : stored.company,
+          : state.company,
     );
   }
 

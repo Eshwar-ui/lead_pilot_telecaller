@@ -113,8 +113,9 @@ class _LeadDetailScreenState extends ConsumerState<LeadDetailScreen> {
         children: [
           LeadSummaryCard(
             lead: lead,
-            totalCalls:
-                mergedHistory.length > lead.totalCalls ? mergedHistory.length : lead.totalCalls,
+            totalCalls: mergedHistory.length > lead.totalCalls
+                ? mergedHistory.length
+                : lead.totalCalls,
             lastContactLabel: _relativeDay(lead.lastContact),
           ),
           const AppGap.md(),
@@ -124,8 +125,7 @@ class _LeadDetailScreenState extends ConsumerState<LeadDetailScreen> {
             leadId: lead.id,
             leadName: lead.name,
             history: mergedHistory,
-            onUploadRecording: () =>
-                UploadRecordingSheet.show(context, lead),
+            onUploadRecording: () => UploadRecordingSheet.show(context, lead),
           ),
           const AppGap.md(),
           MemoryPanel(lead: lead),
@@ -145,21 +145,27 @@ class _LeadDetailScreenState extends ConsumerState<LeadDetailScreen> {
     final merged = [...lead.history];
     for (final c in localCalls) {
       if (c.leadId != lead.id) continue;
-      final dup = merged.any((h) =>
-          h.calledAt != null &&
-          h.calledAt!.difference(c.calledAt).inMinutes.abs() < 1);
+      final dup = merged.any(
+        (h) =>
+            h.calledAt != null &&
+            h.calledAt!.difference(c.calledAt).inMinutes.abs() < 1,
+      );
       if (dup) continue;
-      merged.add(CallRecord(
-        title:
-            '${c.calledAt.day.toString().padLeft(2, '0')}/${c.calledAt.month.toString().padLeft(2, '0')} · placed',
-        duration: c.duration,
-        score: c.score,
-        calledAt: c.calledAt,
-        leadId: lead.id,
-      ));
+      merged.add(
+        CallRecord(
+          title:
+              '${c.calledAt.day.toString().padLeft(2, '0')}/${c.calledAt.month.toString().padLeft(2, '0')} · placed',
+          duration: c.duration,
+          score: c.score,
+          calledAt: c.calledAt,
+          leadId: lead.id,
+        ),
+      );
     }
-    merged.sort((a, b) =>
-        (b.calledAt ?? DateTime(0)).compareTo(a.calledAt ?? DateTime(0)));
+    merged.sort(
+      (a, b) =>
+          (b.calledAt ?? DateTime(0)).compareTo(a.calledAt ?? DateTime(0)),
+    );
     return merged;
   }
 
@@ -222,6 +228,14 @@ class _PipelineStripState extends ConsumerState<_PipelineStrip> {
           discountPct: deal.discountPct,
           note: note,
         );
+      } catch (_) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Couldn’t save the stage move. Try again.'),
+            ),
+          );
+        }
       } finally {
         if (mounted) setState(() => _applying = false);
       }
@@ -230,6 +244,14 @@ class _PipelineStripState extends ConsumerState<_PipelineStrip> {
     setState(() => _applying = true);
     try {
       await notifier.setStage(widget.leadId, stage, note: note);
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Couldn’t save the stage move. Try again.'),
+          ),
+        );
+      }
     } finally {
       if (mounted) setState(() => _applying = false);
     }
@@ -241,16 +263,27 @@ class _PipelineStripState extends ConsumerState<_PipelineStrip> {
   /// or correcting a wrong stage. Picking a backward stage requires a note
   /// (collected in a second step of the same sheet) before it's applied.
   Future<void> _openPicker(LeadStage current) async {
+    // Reversing a terminal decision — reopening a Lost/Junk lead straight to
+    // Won, or casting a Won deal back to Lost/Junk — is a bigger jump than an
+    // ordinary backward move within the working pipeline, so it must go
+    // through the same note-required flow below, not the no-note "Move to
+    // stage" list. A plain `index` comparison against `_working` alone
+    // wouldn't catch this, since Closed Won/Lost/Junk aren't part of `_working`.
+    final reopensToWon = current.isTerminalNegative;
+    final closesFromWon = current == LeadStage.closedWon;
+
     final forward = <LeadStage>[
       for (final s in _PipelineStrip._working)
         if (s.index > current.index) s,
-      if (current != LeadStage.closedWon) LeadStage.closedWon,
+      if (current != LeadStage.closedWon && !reopensToWon) LeadStage.closedWon,
     ];
     final backward = <LeadStage>[
       for (final s in _PipelineStrip._working)
         if (s.index < current.index) s,
+      if (reopensToWon) LeadStage.closedWon,
+      if (closesFromWon) ...[LeadStage.closedLost, LeadStage.junk],
     ];
-    final canLose = !current.isTerminalNegative;
+    final canLose = !current.isTerminalNegative && !closesFromWon;
 
     final result = await showModalBottomSheet<_StagePickerResult>(
       context: context,
@@ -285,8 +318,8 @@ class _PipelineStripState extends ConsumerState<_PipelineStrip> {
     final accent = isNegative
         ? AppColors.alizarin
         : isWon
-            ? AppColors.salem
-            : AppColors.blueRibbon;
+        ? AppColors.salem
+        : AppColors.blueRibbon;
 
     return LpCard(
       padding: EdgeInsets.zero,
@@ -308,7 +341,10 @@ class _PipelineStripState extends ConsumerState<_PipelineStrip> {
                   Container(
                     width: 10,
                     height: 10,
-                    decoration: BoxDecoration(color: accent, shape: BoxShape.circle),
+                    decoration: BoxDecoration(
+                      color: accent,
+                      shape: BoxShape.circle,
+                    ),
                   ),
                   const AppGap.xs(axis: Axis.horizontal),
                   Expanded(
@@ -328,28 +364,49 @@ class _PipelineStripState extends ConsumerState<_PipelineStrip> {
                       child: CircularProgressIndicator(strokeWidth: 2),
                     )
                   else if (isWon)
-                    const Icon(Icons.emoji_events, size: 16, color: AppColors.salem)
+                    const Icon(
+                      Icons.emoji_events,
+                      size: 16,
+                      color: AppColors.salem,
+                    )
                   else if (isNegative) ...[
-                    Text('Closed', style: AppText.caption11.copyWith(color: accent)),
+                    Text(
+                      'Closed',
+                      style: AppText.caption11.copyWith(color: accent),
+                    ),
                     const AppGap.xs(axis: Axis.horizontal),
-                    Text('reopen',
-                        style: AppText.caption11.copyWith(
-                          color: AppColors.blueRibbon,
-                          fontWeight: FontWeight.w700,
-                        )),
-                    const Icon(Icons.keyboard_arrow_down,
-                        size: 16, color: AppColors.blueRibbon),
+                    Text(
+                      'reopen',
+                      style: AppText.caption11.copyWith(
+                        color: AppColors.blueRibbon,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    const Icon(
+                      Icons.keyboard_arrow_down,
+                      size: 16,
+                      color: AppColors.blueRibbon,
+                    ),
                   ] else ...[
-                    Text('$step / $_total',
-                        style: AppText.mono(size: 12).copyWith(color: AppColors.schooner)),
+                    Text(
+                      '$step / $_total',
+                      style: AppText.mono(
+                        size: 12,
+                      ).copyWith(color: AppColors.schooner),
+                    ),
                     const AppGap.xs(axis: Axis.horizontal),
-                    Text('advance',
-                        style: AppText.caption11.copyWith(
-                          color: AppColors.blueRibbon,
-                          fontWeight: FontWeight.w700,
-                        )),
-                    const Icon(Icons.keyboard_arrow_down,
-                        size: 16, color: AppColors.blueRibbon),
+                    Text(
+                      'advance',
+                      style: AppText.caption11.copyWith(
+                        color: AppColors.blueRibbon,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    const Icon(
+                      Icons.keyboard_arrow_down,
+                      size: 16,
+                      color: AppColors.blueRibbon,
+                    ),
                   ],
                 ],
               ),
@@ -411,7 +468,10 @@ class _StagePickerSheetState extends State<_StagePickerSheet> {
     return SafeArea(
       child: Padding(
         padding: EdgeInsets.fromLTRB(
-          16, 12, 16, 20 + MediaQuery.of(context).viewInsets.bottom,
+          16,
+          12,
+          16,
+          20 + MediaQuery.of(context).viewInsets.bottom,
         ),
         child: Column(
           mainAxisSize: MainAxisSize.min,
@@ -437,8 +497,10 @@ class _StagePickerSheetState extends State<_StagePickerSheet> {
       ),
       Text('Move to stage', style: AppText.display20.copyWith(fontSize: 18)),
       const SizedBox(height: 2),
-      Text('Currently: ${widget.current.label}',
-          style: AppText.caption11.copyWith(color: AppColors.schooner)),
+      Text(
+        'Currently: ${widget.current.label}',
+        style: AppText.caption11.copyWith(color: AppColors.schooner),
+      ),
       const AppGap.md(),
       for (final s in widget.forward)
         _StageOptionRow(
@@ -457,8 +519,9 @@ class _StagePickerSheetState extends State<_StagePickerSheet> {
               child: _NegativeButton(
                 label: 'Closed Lost',
                 icon: Icons.cancel_outlined,
-                onTap: () => Navigator.of(context)
-                    .pop(_StagePickerResult(LeadStage.closedLost)),
+                onTap: () => Navigator.of(
+                  context,
+                ).pop(_StagePickerResult(LeadStage.closedLost)),
               ),
             ),
             const AppGap.xs(axis: Axis.horizontal),
@@ -466,8 +529,9 @@ class _StagePickerSheetState extends State<_StagePickerSheet> {
               child: _NegativeButton(
                 label: 'Junk',
                 icon: Icons.block_outlined,
-                onTap: () =>
-                    Navigator.of(context).pop(_StagePickerResult(LeadStage.junk)),
+                onTap: () => Navigator.of(
+                  context,
+                ).pop(_StagePickerResult(LeadStage.junk)),
               ),
             ),
           ],
@@ -479,8 +543,10 @@ class _StagePickerSheetState extends State<_StagePickerSheet> {
         const AppGap.sm(),
         Text('MOVE BACK / REOPEN', style: AppText.label11),
         const SizedBox(height: 2),
-        Text('Requires a note explaining why — it gets saved with the change.',
-            style: AppText.caption11.copyWith(color: AppColors.schooner)),
+        Text(
+          'Requires a note explaining why — it gets saved with the change.',
+          style: AppText.caption11.copyWith(color: AppColors.schooner),
+        ),
         const AppGap.xs(),
         for (final s in widget.backward)
           _StageOptionRow(
@@ -507,8 +573,10 @@ class _StagePickerSheetState extends State<_StagePickerSheet> {
           ),
           const AppGap.sm(axis: Axis.horizontal),
           Expanded(
-            child: Text('Move back to ${stage.label}',
-                style: AppText.display20.copyWith(fontSize: 18)),
+            child: Text(
+              'Move back to ${stage.label}',
+              style: AppText.display20.copyWith(fontSize: 18),
+            ),
           ),
         ],
       ),
@@ -551,8 +619,9 @@ class _StagePickerSheetState extends State<_StagePickerSheet> {
           icon: Icons.check,
           onTap: note.isEmpty
               ? null
-              : () => Navigator.of(context)
-                  .pop(_StagePickerResult(stage, note: note)),
+              : () => Navigator.of(
+                  context,
+                ).pop(_StagePickerResult(stage, note: note)),
         ),
       ),
     ];
@@ -641,11 +710,16 @@ class _StageOptionRow extends StatelessWidget {
               ),
             ),
             if (isWin)
-              Text('deal',
-                  style: AppText.caption11.copyWith(color: AppColors.salem))
+              Text(
+                'deal',
+                style: AppText.caption11.copyWith(color: AppColors.salem),
+              )
             else
-              Icon(Icons.chevron_right, size: 18,
-                  color: muted ? AppColors.tahitiGold : AppColors.tide),
+              Icon(
+                Icons.chevron_right,
+                size: 18,
+                color: muted ? AppColors.tahitiGold : AppColors.tide,
+              ),
           ],
         ),
       ),
@@ -683,11 +757,13 @@ class _NegativeButton extends StatelessWidget {
           children: [
             Icon(icon, size: 16, color: AppColors.alizarin),
             const SizedBox(width: 6),
-            Text(label,
-                style: AppText.body13.copyWith(
-                  color: AppColors.alizarin,
-                  fontWeight: FontWeight.w700,
-                )),
+            Text(
+              label,
+              style: AppText.body13.copyWith(
+                color: AppColors.alizarin,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
           ],
         ),
       ),
@@ -729,14 +805,19 @@ class _NextStepsPanel extends StatelessWidget {
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    const Icon(Icons.calendar_today_outlined,
-                        size: 14, color: AppColors.blueRibbon),
+                    const Icon(
+                      Icons.calendar_today_outlined,
+                      size: 14,
+                      color: AppColors.blueRibbon,
+                    ),
                     const SizedBox(width: 4),
-                    Text('Schedule',
-                        style: AppText.caption11.copyWith(
-                          color: AppColors.blueRibbon,
-                          fontWeight: FontWeight.w700,
-                        )),
+                    Text(
+                      'Schedule',
+                      style: AppText.caption11.copyWith(
+                        color: AppColors.blueRibbon,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
                   ],
                 ),
               ),
@@ -759,7 +840,9 @@ class _NextStepsPanel extends StatelessWidget {
           if (step.isNotEmpty && commitments.isNotEmpty) const AppGap.sm(),
           for (var i = 0; i < commitments.length; i++)
             Padding(
-              padding: EdgeInsets.only(bottom: i == commitments.length - 1 ? 0 : 8),
+              padding: EdgeInsets.only(
+                bottom: i == commitments.length - 1 ? 0 : 8,
+              ),
               child: _NextStepRow(
                 icon: Icons.check_circle_outline,
                 iconColor: AppColors.tahitiGold,
@@ -836,9 +919,9 @@ class _MemoryPanelState extends ConsumerState<MemoryPanel> {
     try {
       await ref.read(leadsProvider.notifier).rebuildMemory(widget.lead.id);
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Memory rebuilt')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Memory rebuilt')));
     } on ApiException catch (e) {
       if (!mounted) return;
       // 404 = this contact has no analysed calls yet, so retrying won't help;
@@ -846,8 +929,7 @@ class _MemoryPanelState extends ConsumerState<MemoryPanel> {
       final msg = e.isNotFound
           ? 'No analysed calls yet — nothing to rebuild.'
           : 'Couldn’t rebuild memory. Try again.';
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text(msg)));
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
     } catch (_) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -873,50 +955,57 @@ class _MemoryPanelState extends ConsumerState<MemoryPanel> {
       trailing: compact
           ? null
           : (_rebuilding
-              ? const SizedBox(
-                  width: 18,
-                  height: 18,
-                  child: CircularProgressIndicator(
-                    strokeWidth: 2,
-                    color: AppColors.electricViolet,
-                  ),
-                )
-              : IconButton(
-                  onPressed: _rebuild,
-                  visualDensity: VisualDensity.compact,
-                  tooltip: 'Rebuild memory from all calls',
-                  icon: const Icon(Icons.refresh,
-                      size: 18, color: AppColors.electricViolet),
-                )),
+                ? const SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      color: AppColors.electricViolet,
+                    ),
+                  )
+                : IconButton(
+                    onPressed: _rebuild,
+                    visualDensity: VisualDensity.compact,
+                    tooltip: 'Rebuild memory from all calls',
+                    icon: const Icon(
+                      Icons.refresh,
+                      size: 18,
+                      color: AppColors.electricViolet,
+                    ),
+                  )),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           if (compact && lead.history.isNotEmpty) ...[
-            Builder(builder: (_) {
-              final last = lead.history.first;
-              final when = last.calledAt;
-              final ago = when == null
-                  ? 'recently'
-                  : _agoLabel(DateTime.now().difference(when));
-              return Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                decoration: BoxDecoration(
-                  color: AppColors.ribbonSurface,
-                  borderRadius: BorderRadius.circular(999),
-                ),
-                child: Text(
-                  last.score > 0
-                      ? 'Last called $ago · Score ${last.score}'
-                      : 'Last called $ago',
-                  style: AppText.body13.copyWith(
-                    color: AppColors.blueRibbon,
-                    fontSize: 12,
-                    fontWeight: FontWeight.w700,
+            Builder(
+              builder: (_) {
+                final last = lead.history.first;
+                final when = last.calledAt;
+                final ago = when == null
+                    ? 'recently'
+                    : _agoLabel(DateTime.now().difference(when));
+                return Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 10,
+                    vertical: 4,
                   ),
-                ),
-              );
-            }),
+                  decoration: BoxDecoration(
+                    color: AppColors.ribbonSurface,
+                    borderRadius: BorderRadius.circular(999),
+                  ),
+                  child: Text(
+                    last.score > 0
+                        ? 'Last called $ago · Score ${last.score}'
+                        : 'Last called $ago',
+                    style: AppText.body13.copyWith(
+                      color: AppColors.blueRibbon,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                );
+              },
+            ),
             const AppGap.sm(),
           ],
           for (final item in compact ? lead.memory.take(3) : lead.memory)
@@ -1016,14 +1105,19 @@ class CallHistoryPanel extends StatelessWidget {
                         child: Row(
                           mainAxisSize: MainAxisSize.min,
                           children: [
-                            const Icon(Icons.upload_file,
-                                size: 15, color: AppColors.blueRibbon),
+                            const Icon(
+                              Icons.upload_file,
+                              size: 15,
+                              color: AppColors.blueRibbon,
+                            ),
                             const SizedBox(width: 4),
-                            Text('Upload',
-                                style: AppText.caption11.copyWith(
-                                  color: AppColors.blueRibbon,
-                                  fontWeight: FontWeight.w700,
-                                )),
+                            Text(
+                              'Upload',
+                              style: AppText.caption11.copyWith(
+                                color: AppColors.blueRibbon,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
                           ],
                         ),
                       ),
@@ -1110,4 +1204,3 @@ class CallHistoryPanel extends StatelessWidget {
     );
   }
 }
-

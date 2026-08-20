@@ -93,7 +93,14 @@ class CallRecordingService {
   static const int _maxEntriesPerRoot = 4000;
 
   static const Set<String> _audioExtensions = {
-    'mp3', 'm4a', 'amr', 'wav', 'aac', 'ogg', '3gp', 'mp4',
+    'mp3',
+    'm4a',
+    'amr',
+    'wav',
+    'aac',
+    'ogg',
+    '3gp',
+    'mp4',
   };
 
   bool get _isAndroid =>
@@ -180,7 +187,8 @@ class CallRecordingService {
         }
         // Phone-matched candidate: filename (digits only) contains the number.
         if (digits.isNotEmpty && _fileNameDigits(entry.path).contains(digits)) {
-          if (newestMatchModified == null || modified.isAfter(newestMatchModified)) {
+          if (newestMatchModified == null ||
+              modified.isAfter(newestMatchModified)) {
             newestMatch = entry;
             newestMatchModified = modified;
           }
@@ -191,7 +199,16 @@ class CallRecordingService {
     // A phone-matched recording wins over merely-newest; fall back otherwise.
     final chosen = newestMatch ?? newest;
     if (chosen == null) return null;
-    return CallRecording.fromFile(chosen);
+    try {
+      // Same TOCTOU window as the scan loop's own statSync above, just at the
+      // end instead of during — an OEM dialer that rotates/deletes old
+      // recordings can still remove `chosen` between being selected here and
+      // this final stat. Treat it the same as "not found" instead of letting
+      // a raw FileSystemException surface as "Something went wrong" in the UI.
+      return CallRecording.fromFile(chosen);
+    } on FileSystemException {
+      return null;
+    }
   }
 
   /// Yields every audio file under [root], descending at most [_maxScanDepth]

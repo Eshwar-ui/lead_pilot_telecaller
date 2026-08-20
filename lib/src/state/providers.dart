@@ -22,6 +22,7 @@ import '../services/local_follow_up_store.dart';
 import '../services/local_lead_override_store.dart';
 import '../services/native_call_log_service.dart';
 import '../services/session_store.dart';
+import '../services/user_profile_store.dart';
 
 // ─── Backend wiring ───────────────────────────────────────────────────────────
 
@@ -31,13 +32,62 @@ import '../services/session_store.dart';
 /// also feeds [serverReachableProvider] so the app-wide "can't reach server"
 /// banner (see `app.dart`) reflects real connectivity, not just the leads
 /// screen's own fallback-to-mock-data path.
-final apiClientProvider = Provider<ApiClient>(
-  (ref) => HttpApiClient(
+final apiClientProvider = Provider<ApiClient>((ref) {
+  final guard = _LogoutGuard();
+  return HttpApiClient(
     getToken: () => ref.read(sessionProvider).token,
-    onConnectivityOk: () => ref.read(serverReachableProvider.notifier).markReachable(),
-    onConnectivityIssue: () => ref.read(serverReachableProvider.notifier).markUnreachable(),
-  ),
-);
+    onConnectivityOk: () =>
+        ref.read(serverReachableProvider.notifier).markReachable(),
+    onConnectivityIssue: () =>
+        ref.read(serverReachableProvider.notifier).markUnreachable(),
+    onUnauthorized: () => _forceLogout(ref, guard),
+  );
+});
+
+/// Guards [_forceLogout] against a burst of concurrent 401s. One per
+/// [apiClientProvider] instance so it resets cleanly between tests/logins
+/// instead of leaking across ProviderContainers like a top-level static would.
+class _LogoutGuard {
+  bool loggingOut = false;
+}
+
+/// A previously-valid session's token was rejected by the backend (expired,
+/// signing-secret rotated, etc.) — force a clean logout so the router's
+/// session-driven redirect (`app_router.dart`) bounces to `/login` instead of
+/// leaving screens stuck on a raw "expired" error or a silent mock-data
+/// fallback. Guarded so a burst of concurrent 401s (several screens' fetches
+/// racing after the token dies) only logs out once instead of clearing an
+/// already-empty session and re-invalidating every provider per request.
+///
+/// `sessionProvider.isLoggedIn` alone isn't a safe guard — it only flips
+/// after `logout()`'s several awaited storage ops finish, so near-simultaneous
+/// 401s (e.g. leads + follow-ups + attendance + calls all refetching on the
+/// same stale token) would each read `isLoggedIn == true` and independently
+/// re-run this whole function. `guard.loggingOut` flips synchronously instead,
+/// before any await, so the rest of that burst bails out immediately.
+void _forceLogout(Ref ref, _LogoutGuard guard) {
+  if (guard.loggingOut || !ref.read(sessionProvider).isLoggedIn) return;
+  guard.loggingOut = true;
+  unawaited(
+    ref
+        .read(sessionProvider.notifier)
+        .logout()
+        .whenComplete(() => guard.loggingOut = false),
+  );
+  // Mirrors the invalidation list in login_screen.dart / profile_screen.dart.
+  ref.invalidate(userProfileProvider);
+  ref.invalidate(orgProfileProvider);
+  ref.invalidate(leadsProvider);
+  ref.invalidate(leadsUsingFallbackProvider);
+  ref.invalidate(followUpsProvider);
+  ref.invalidate(localCallsProvider);
+  ref.invalidate(leadStageProvider);
+  ref.invalidate(checklistExtrasProvider);
+  ref.invalidate(callNotesProvider);
+  ref.invalidate(selectedLeadIdProvider);
+  ref.invalidate(telecallerScoreProvider);
+  ref.invalidate(attendanceProvider);
+}
 
 /// Whether the backend was reachable as of the most recent request — true
 /// (optimistic) until proven otherwise. Drives the global "no server
@@ -184,8 +234,9 @@ class LeadsUsingFallbackController extends Notifier<bool> {
 
 /// True while [LeadsController] is running its initial/refresh fetch —
 /// screens watch this to show a shimmer skeleton instead of an empty list.
-final leadsLoadingProvider =
-    NotifierProvider<LeadsLoadingController, bool>(LeadsLoadingController.new);
+final leadsLoadingProvider = NotifierProvider<LeadsLoadingController, bool>(
+  LeadsLoadingController.new,
+);
 
 class LeadsLoadingController extends Notifier<bool> {
   @override
@@ -215,13 +266,20 @@ class LeadsController extends Notifier<List<Lead>> {
 
   Future<void> _loadOverrides() async {
     _overrides = await ref.read(localLeadOverrideStoreProvider).loadAll();
-    if (_overrides.isNotEmpty) state = [for (final l in state) _withOverride(l)];
+    if (_overrides.isNotEmpty) {
+      state = [for (final l in state) _withOverride(l)];
+    }
   }
 
-  Lead _withOverride(Lead lead) =>
-      _overrides[lead.id]?.applyTo(lead) ?? lead;
+  Lead _withOverride(Lead lead) => _overrides[lead.id]?.applyTo(lead) ?? lead;
 
   Future<void> _load() async {
+    // A force-logout invalidates this provider (see `_forceLogout`), which
+    // re-runs `build()` and re-schedules `_load()` here — but the router is
+    // about to redirect to `/login` regardless, so fetching (and, on
+    // failure, falling back to mock data) would just flash fake leads on
+    // whatever screen is still mounted for that one frame.
+    if (!ref.read(sessionProvider).isLoggedIn) return;
     ref.read(leadsLoadingProvider.notifier).set(true);
     _overrides = await ref.read(localLeadOverrideStoreProvider).loadAll();
     try {
@@ -251,8 +309,9 @@ class LeadsController extends Notifier<List<Lead>> {
   Future<void> enrich(String contactKey) async {
     if (ApiConfig.useMockData || contactKey.isEmpty) return;
     try {
-      final result =
-          await ref.read(leadRepositoryProvider).leadDetailWithStage(contactKey);
+      final result = await ref
+          .read(leadRepositoryProvider)
+          .leadDetailWithStage(contactKey);
       state = [
         for (final lead in state)
           if (lead.id == contactKey) _withOverride(result.lead) else lead,
@@ -263,16 +322,24 @@ class LeadsController extends Notifier<List<Lead>> {
       // merely opening a lead that carries another user's / imported call never
       // adds a phantom "call" the user never made. Upsert/merge is downstream.
       final myId = ref.read(sessionProvider).userId;
-      unawaited(ref
-          .read(localCallsProvider.notifier)
-          .ingest(callEntriesFromLead(result.lead, currentUserId: myId)));
+      unawaited(
+        ref
+            .read(localCallsProvider.notifier)
+            .ingest(callEntriesFromLead(result.lead, currentUserId: myId)),
+      );
       // Read back the authoritative kanban stage (server wins) so a move made on
       // the web dashboard is reflected here too. Fail-soft / fire-and-forget.
       final stage = result.stage;
       if (stage != null && stage.isNotEmpty) {
-        unawaited(ref.read(leadStageProvider.notifier).syncFromServer(contactKey, stage));
+        unawaited(
+          ref
+              .read(leadStageProvider.notifier)
+              .syncFromServer(contactKey, stage),
+        );
       }
-    } catch (_) {/* keep the thin card */}
+    } catch (_) {
+      /* keep the thin card */
+    }
   }
 
   /// Recompute a contact's memory bubble from all their calls, then re-enrich
@@ -299,14 +366,15 @@ class LeadsController extends Notifier<List<Lead>> {
 // Backend endpoint doesn't exist yet; wire it here when it does.
 final followUpsProvider =
     NotifierProvider<FollowUpController, List<FollowUpTask>>(
-  FollowUpController.new,
-);
+      FollowUpController.new,
+    );
 
 /// True while [FollowUpController] is running its initial/refresh load —
 /// screens watch this to show a shimmer skeleton instead of an empty list.
-final followUpsLoadingProvider = NotifierProvider<FollowUpsLoadingController, bool>(
-  FollowUpsLoadingController.new,
-);
+final followUpsLoadingProvider =
+    NotifierProvider<FollowUpsLoadingController, bool>(
+      FollowUpsLoadingController.new,
+    );
 
 class FollowUpsLoadingController extends Notifier<bool> {
   @override
@@ -353,11 +421,13 @@ List<FollowUpTask> reconcileFollowUps(
     final done =
         t.status == FollowUpStatus.done || r.status == FollowUpStatus.done;
     final scheduledAt = r.scheduledAt ?? t.scheduledAt;
-    result.add(t.copyWith(
-      status: done ? FollowUpStatus.done : r.status,
-      scheduledAt: scheduledAt,
-      dueToday: done ? false : _followUpIsToday(scheduledAt),
-    ));
+    result.add(
+      t.copyWith(
+        status: done ? FollowUpStatus.done : r.status,
+        scheduledAt: scheduledAt,
+        dueToday: done ? false : _followUpIsToday(scheduledAt),
+      ),
+    );
   }
 
   for (final r in remote) {
@@ -365,11 +435,13 @@ List<FollowUpTask> reconcileFollowUps(
     if (bid == null || kept.contains(bid)) continue;
     final lead = r.leadId == null ? null : leadsById[r.leadId];
     final done = r.status == FollowUpStatus.done;
-    result.add(r.copyWith(
-      leadName: lead?.name ?? r.leadName,
-      phone: lead?.phone ?? r.phone,
-      dueToday: done ? false : _followUpIsToday(r.scheduledAt),
-    ));
+    result.add(
+      r.copyWith(
+        leadName: lead?.name ?? r.leadName,
+        phone: lead?.phone ?? r.phone,
+        dueToday: done ? false : _followUpIsToday(r.scheduledAt),
+      ),
+    );
   }
 
   return result;
@@ -382,6 +454,15 @@ bool _followUpIsToday(DateTime? dt) {
 }
 
 class FollowUpController extends Notifier<List<FollowUpTask>> {
+  /// Bumped on every [_load] call so an in-flight one can tell it's been
+  /// superseded by a newer call — [schedule] fires `_load()` twice
+  /// (immediately, then again once the backend id comes back), and if the
+  /// first, slower call's remote round-trip finishes after the second, its
+  /// `state = reconciled` would otherwise overwrite the correct
+  /// backend-id-bearing state with a stale reconcile computed from a local
+  /// snapshot taken before that id was ever assigned.
+  int _loadGeneration = 0;
+
   @override
   List<FollowUpTask> build() {
     // Deferred to a microtask: `_load` mutates `followUpsLoadingProvider`
@@ -392,9 +473,13 @@ class FollowUpController extends Notifier<List<FollowUpTask>> {
   }
 
   Future<void> _load() async {
+    final generation = ++_loadGeneration;
     ref.read(followUpsLoadingProvider.notifier).set(true);
     try {
       final local = await ref.read(localFollowUpStoreProvider).loadAll();
+      if (generation != _loadGeneration) {
+        return; // superseded — drop this result
+      }
       state = local;
       // Reconcile against the backend so status changes made on another device
       // (same telecaller account) propagate: a follow-up marked done or deleted
@@ -404,8 +489,10 @@ class FollowUpController extends Notifier<List<FollowUpTask>> {
         final remote = await ref
             .read(followUpRepositoryProvider)
             .list(includeCompleted: true);
+        if (generation != _loadGeneration) return;
         final leadsById = {for (final l in ref.read(leadsProvider)) l.id: l};
         final reconciled = reconcileFollowUps(local, remote, leadsById);
+        if (generation != _loadGeneration) return;
         state = reconciled;
         // Persist the merged view so it survives a restart without re-fetching.
         await ref.read(localFollowUpStoreProvider).replaceAll(reconciled);
@@ -413,10 +500,13 @@ class FollowUpController extends Notifier<List<FollowUpTask>> {
         // Offline / backend down — local remains the source of truth.
       }
     } finally {
-      ref.read(followUpsLoadingProvider.notifier).set(false);
+      // Only the most recent call gets to toggle loading off — a superseded
+      // call finishing late shouldn't flip it back after the winner already did.
+      if (generation == _loadGeneration) {
+        ref.read(followUpsLoadingProvider.notifier).set(false);
+      }
     }
   }
-
 
   /// Pull-to-refresh: re-run the local+remote merge so follow-ups created or
   /// synced from another device (same telecaller account) show up here without
@@ -430,15 +520,17 @@ class FollowUpController extends Notifier<List<FollowUpTask>> {
     await ref.read(localFollowUpStoreProvider).add(task);
     unawaited(_load());
     try {
-      final backendId = await ref.read(followUpRepositoryProvider).create(
-        leadId: task.leadId,
-        note: task.taskText,
-        dueAt: task.scheduledAt ?? DateTime.now(),
-      );
+      final backendId = await ref
+          .read(followUpRepositoryProvider)
+          .create(
+            leadId: task.leadId,
+            note: task.taskText,
+            dueAt: task.scheduledAt ?? DateTime.now(),
+          );
       if (backendId.isNotEmpty) {
-        await ref.read(localFollowUpStoreProvider).update(
-          task.copyWith(backendId: backendId),
-        );
+        await ref
+            .read(localFollowUpStoreProvider)
+            .update(task.copyWith(backendId: backendId));
         unawaited(_load());
       }
     } catch (_) {
@@ -455,7 +547,9 @@ class FollowUpController extends Notifier<List<FollowUpTask>> {
     unawaited(_load());
     if (backendId != null) {
       try {
-        await ref.read(followUpRepositoryProvider).setCompleted(backendId, true);
+        await ref
+            .read(followUpRepositoryProvider)
+            .setCompleted(backendId, true);
       } catch (_) {
         // Fail soft — local state already reflects "done".
       }
@@ -466,7 +560,10 @@ class FollowUpController extends Notifier<List<FollowUpTask>> {
     final backendId = _backendIdFor(id);
     await ref.read(localFollowUpStoreProvider).delete(id);
     // Reflect the removal immediately in memory.
-    state = [for (final t in state) if (t.id != id) t];
+    state = [
+      for (final t in state)
+        if (t.id != id) t,
+    ];
     if (backendId == null) return; // local-only task, nothing to sync
     try {
       await ref.read(followUpRepositoryProvider).delete(backendId);
@@ -530,8 +627,8 @@ class CallLogSyncState {
 
 final callLogSyncProvider =
     NotifierProvider<CallLogSyncController, CallLogSyncState>(
-  CallLogSyncController.new,
-);
+      CallLogSyncController.new,
+    );
 
 /// Reads the device's native call log (every call, any app) and merges it
 /// into [localCallsProvider], then best-effort syncs the new entries to the
@@ -552,15 +649,18 @@ class CallLogSyncController extends Notifier<CallLogSyncState> {
   }
 
   Future<void> _checkPermission() async {
-    final granted = await ref.read(nativeCallLogServiceProvider).hasPermission();
+    final granted = await ref
+        .read(nativeCallLogServiceProvider)
+        .hasPermission();
     state = state.copyWith(checked: true, permissionGranted: granted);
     if (granted) unawaited(sync());
   }
 
   /// Explicit user opt-in from the Calls screen's permission-prompt card.
   Future<bool> requestPermissionAndSync() async {
-    final granted =
-        await ref.read(nativeCallLogServiceProvider).requestPermission();
+    final granted = await ref
+        .read(nativeCallLogServiceProvider)
+        .requestPermission();
     state = state.copyWith(checked: true, permissionGranted: granted);
     if (granted) await sync();
     return granted;
@@ -575,8 +675,9 @@ class CallLogSyncController extends Notifier<CallLogSyncState> {
       final since = lastMillis != null
           ? DateTime.fromMillisecondsSinceEpoch(lastMillis)
           : DateTime.now().subtract(_firstSyncLookback);
-      final entries =
-          await ref.read(nativeCallLogServiceProvider).fetchSince(since);
+      final entries = await ref
+          .read(nativeCallLogServiceProvider)
+          .fetchSince(since);
       if (entries.isNotEmpty) {
         await ref.read(localCallsProvider.notifier).ingest(entries);
         try {
@@ -603,26 +704,26 @@ class CallLogSyncController extends Notifier<CallLogSyncState> {
 /// independent of this. Pass null to keep every timestamped call (legacy
 /// behaviour, e.g. when the signed-in user isn't known).
 List<CallLogEntry> callEntriesFromLead(Lead lead, {String? currentUserId}) => [
-      for (final c in lead.history)
-        if (c.calledAt != null &&
-            (currentUserId == null || c.placedBy == currentUserId))
-          CallLogEntry(
-            id: c.callId ?? '${lead.id}_${c.calledAt!.millisecondsSinceEpoch}',
-            leadName: lead.name,
-            phone: lead.phone,
-            intent: lead.intent,
-            source: lead.source,
-            duration: c.duration,
-            score: c.score,
-            // Backend timestamps come back UTC — store as local so the calls
-            // screen's day-grouping and time formatting (which read the
-            // DateTime's own fields) show the real local call time.
-            calledAt: c.calledAt!.toLocal(),
-            leadId: lead.id,
-            callId: c.callId,
-            sentiment: c.sentiment,
-          ),
-    ];
+  for (final c in lead.history)
+    if (c.calledAt != null &&
+        (currentUserId == null || c.placedBy == currentUserId))
+      CallLogEntry(
+        id: c.callId ?? '${lead.id}_${c.calledAt!.millisecondsSinceEpoch}',
+        leadName: lead.name,
+        phone: lead.phone,
+        intent: lead.intent,
+        source: lead.source,
+        duration: c.duration,
+        score: c.score,
+        // Backend timestamps come back UTC — store as local so the calls
+        // screen's day-grouping and time formatting (which read the
+        // DateTime's own fields) show the real local call time.
+        calledAt: c.calledAt!.toLocal(),
+        leadId: lead.id,
+        callId: c.callId,
+        sentiment: c.sentiment,
+      ),
+];
 
 // ─── Checklist extras ─────────────────────────────────────────────────────────
 
@@ -630,17 +731,30 @@ List<CallLogEntry> callEntriesFromLead(Lead lead, {String? currentUserId}) => [
 /// returns no checklist for a lead (currently always the case).
 const defaultChecklistItems = [
   ChecklistItem(id: '__budget', text: 'Confirm budget range', completed: false),
-  ChecklistItem(id: '__type', text: 'Property type (1BHK / 2BHK / 3BHK)', completed: false),
-  ChecklistItem(id: '__location', text: 'Preferred location / project', completed: false),
+  ChecklistItem(
+    id: '__type',
+    text: 'Property type (1BHK / 2BHK / 3BHK)',
+    completed: false,
+  ),
+  ChecklistItem(
+    id: '__location',
+    text: 'Preferred location / project',
+    completed: false,
+  ),
   ChecklistItem(id: '__timeline', text: 'Move-in timeline', completed: false),
-  ChecklistItem(id: '__loan', text: 'Loan / financing pre-approval', completed: false),
+  ChecklistItem(
+    id: '__loan',
+    text: 'Loan / financing pre-approval',
+    completed: false,
+  ),
 ];
 
 /// Per-lead extra checklist items added by the telecaller via "Add item…".
 final checklistExtrasProvider =
-    NotifierProvider<ChecklistExtrasController, Map<String, List<ChecklistItem>>>(
-  ChecklistExtrasController.new,
-);
+    NotifierProvider<
+      ChecklistExtrasController,
+      Map<String, List<ChecklistItem>>
+    >(ChecklistExtrasController.new);
 
 class ChecklistExtrasController
     extends Notifier<Map<String, List<ChecklistItem>>> {
@@ -772,11 +886,46 @@ final outboundLeadDraftProvider =
     );
 
 class OutboundLeadDraftController extends Notifier<OutboundLeadDraft> {
+  Timer? _dedupeDebounce;
+
   @override
-  OutboundLeadDraft build() => const OutboundLeadDraft();
+  OutboundLeadDraft build() {
+    ref.onDispose(() => _dedupeDebounce?.cancel());
+    return const OutboundLeadDraft();
+  }
 
   void updateName(String value) => state = state.copyWith(name: value);
-  void updatePhone(String value) => state = state.copyWith(phone: value);
+
+  /// Debounced `GET /api/leads/dedupe` so the "already in your leads"
+  /// banner reflects the real backend record, not the unused [dedupe]
+  /// wiring this previously had (the repository method existed but nothing
+  /// ever called it).
+  void updatePhone(String value) {
+    state = state.copyWith(phone: value, clearDedupe: true);
+    _dedupeDebounce?.cancel();
+    final digits = value.replaceAll(RegExp(r'[^0-9]'), '');
+    if (digits.length < 10) return;
+    _dedupeDebounce = Timer(
+      const Duration(milliseconds: 500),
+      () => _checkDedupe(value),
+    );
+  }
+
+  Future<void> _checkDedupe(String phone) async {
+    try {
+      final result = await ref.read(leadRepositoryProvider).dedupe(phone);
+      // The phone field may have changed again while this was in flight —
+      // don't clobber a newer value's state with a stale response.
+      if (state.phone != phone) return;
+      state = state.copyWith(
+        hasDuplicate: result.duplicate,
+        dedupeContactKey: result.contactKey,
+      );
+    } catch (_) {
+      // Fail soft: dedupe is a convenience warning, not a hard gate on saving.
+    }
+  }
+
   void updateReason(String value) => state = state.copyWith(reason: value);
   void updateSource(String value) => state = state.copyWith(source: value);
 }
@@ -787,8 +936,8 @@ class OutboundLeadDraftController extends Notifier<OutboundLeadDraft> {
 /// Key: `lead_stages_v1` → JSON object { leadId: stageName }.
 final leadStageProvider =
     NotifierProvider<LeadStageController, Map<String, LeadStage>>(
-  LeadStageController.new,
-);
+      LeadStageController.new,
+    );
 
 class LeadStageController extends Notifier<Map<String, LeadStage>> {
   static const _key = 'lead_stages_v1';
@@ -806,7 +955,8 @@ class LeadStageController extends Notifier<Map<String, LeadStage>> {
     try {
       final map = jsonDecode(raw) as Map<String, dynamic>;
       state = {
-        for (final e in map.entries) e.key: LeadStageX.fromValue(e.value as String?),
+        for (final e in map.entries)
+          e.key: LeadStageX.fromValue(e.value as String?),
       };
     } catch (_) {}
   }
@@ -819,9 +969,9 @@ class LeadStageController extends Notifier<Map<String, LeadStage>> {
     double? discountPct,
     String? note,
   }) async {
-    // Optimistic local update first (keeps the UI responsive / offline-usable,
-    // matching this app's existing fail-soft pattern), then push to the
-    // backend so the founder's web Kanban sees the move too.
+    final previous = state[leadId] ?? LeadStage.newLead;
+    // Optimistic local update first (keeps the UI responsive / offline-usable),
+    // then push to the backend so the founder's web Kanban sees the move too.
     state = {...state, leadId: stage};
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(
@@ -829,20 +979,29 @@ class LeadStageController extends Notifier<Map<String, LeadStage>> {
       jsonEncode({for (final e in state.entries) e.key: e.value.value}),
     );
     try {
-      await ref.read(leadRepositoryProvider).updateLeadStage(
-        leadId,
-        stage,
-        dealValue: dealValue,
-        listPrice: listPrice,
-        discountPct: discountPct,
-        note: note,
-      );
+      await ref
+          .read(leadRepositoryProvider)
+          .updateLeadStage(
+            leadId,
+            stage,
+            dealValue: dealValue,
+            listPrice: listPrice,
+            discountPct: discountPct,
+            note: note,
+          );
     } catch (_) {
-      // Fail soft: local state already reflects the move; the next successful
-      // sync (or a future outbox/retry mechanism) will reconcile the backend.
-      // NOTE: for a backward move this means the backend may never see the
-      // required note if this request fails — same fail-soft trade-off the
-      // app already accepts for every other stage move, not a new gap.
+      // Roll back rather than fail soft: keeping the optimistic move on a
+      // failed request meant the phone and the founder's web Kanban could
+      // permanently diverge with no reconciliation path, and a backward
+      // move's required note would silently never reach the backend at all.
+      // Rethrow so the caller can surface the failure and let the telecaller
+      // retry instead of believing the move went through.
+      state = {...state, leadId: previous};
+      await prefs.setString(
+        _key,
+        jsonEncode({for (final e in state.entries) e.key: e.value.value}),
+      );
+      rethrow;
     }
   }
 
@@ -915,8 +1074,8 @@ class AttendanceState {
 /// screen's Attendance card.
 final attendanceProvider =
     NotifierProvider<AttendanceController, AttendanceState>(
-  AttendanceController.new,
-);
+      AttendanceController.new,
+    );
 
 class AttendanceController extends Notifier<AttendanceState> {
   @override
@@ -932,6 +1091,13 @@ class AttendanceController extends Notifier<AttendanceState> {
   }
 
   Future<void> _load() async {
+    // Same reasoning as `LeadsController._load()`: a force-logout invalidate
+    // re-triggers this during the redirect-to-login transition, and without
+    // this guard it would surface a raw "Not signed in" error for that frame.
+    if (!ref.read(sessionProvider).isLoggedIn) {
+      state = state.copyWith(loading: false);
+      return;
+    }
     state = state.copyWith(loading: true, clearError: true);
     try {
       final repo = ref.read(attendanceRepositoryProvider);
@@ -942,8 +1108,12 @@ class AttendanceController extends Notifier<AttendanceState> {
       try {
         final mine = await repo.mine(days: 7);
         openPast = mine
-            .where((r) =>
-                r.checkInAt != null && r.checkOutAt == null && r.id != record.id)
+            .where(
+              (r) =>
+                  r.checkInAt != null &&
+                  r.checkOutAt == null &&
+                  r.id != record.id,
+            )
             .toList();
       } on ApiException {
         openPast = const [];

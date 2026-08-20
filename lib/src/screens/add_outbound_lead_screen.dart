@@ -37,10 +37,49 @@ class _AddOutboundLeadScreenState extends ConsumerState<AddOutboundLeadScreen> {
   bool _saving = false;
   DateTime _callDate = DateTime.now();
   String? _callId;
+  late final TextEditingController _phoneController;
+
+  /// Once a recording has been uploaded, the backend has already resolved a
+  /// contact for it from whatever name/phone were on screen at that moment.
+  /// Editing either field after that would let `createLead()` derive a
+  /// different contact_key than the upload did, silently attaching the call
+  /// to the wrong lead — so lock identity fields as soon as a call exists.
+  bool get _identityLocked => _callId != null;
+
+  @override
+  void initState() {
+    super.initState();
+    _phoneController = TextEditingController(
+      text: localPhoneDigits(ref.read(outboundLeadDraftProvider).phone),
+    );
+    _phoneController.addListener(() {
+      ref
+          .read(outboundLeadDraftProvider.notifier)
+          .updatePhone('+91${_phoneController.text.trim()}');
+    });
+  }
+
+  @override
+  void dispose() {
+    _phoneController.dispose();
+    super.dispose();
+  }
 
   String _fmtDate(DateTime d) {
-    const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
-                    'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    const months = [
+      'Jan',
+      'Feb',
+      'Mar',
+      'Apr',
+      'May',
+      'Jun',
+      'Jul',
+      'Aug',
+      'Sep',
+      'Oct',
+      'Nov',
+      'Dec',
+    ];
     return '${d.day} ${months[d.month - 1]} ${d.year}';
   }
 
@@ -61,10 +100,19 @@ class _AddOutboundLeadScreenState extends ConsumerState<AddOutboundLeadScreen> {
       return; // already in flight
     }
 
-    // Name must be filled before upload so the call links to the right lead.
+    // Name + a valid phone must be filled before upload so the call links to
+    // the right lead, and so the identity fields can be locked afterward
+    // (see `_identityLocked`) instead of letting them silently diverge from
+    // what the backend already resolved this recording's contact from.
     final draftCheck = ref.read(outboundLeadDraftProvider);
     if (draftCheck.name.trim().isEmpty) {
       _toast('Enter lead name before uploading a recording');
+      return;
+    }
+    if (_phoneController.text.trim().length != 10) {
+      _toast(
+        'Enter a valid 10-digit phone number before uploading a recording',
+      );
       return;
     }
 
@@ -72,7 +120,14 @@ class _AddOutboundLeadScreenState extends ConsumerState<AddOutboundLeadScreen> {
       type: FileType.custom,
       // 'opus' covers WhatsApp voice notes, which are shared as .opus files.
       allowedExtensions: [
-        'mp3', 'wav', 'm4a', 'ogg', 'opus', 'aac', 'mpeg', 'mp4',
+        'mp3',
+        'wav',
+        'm4a',
+        'ogg',
+        'opus',
+        'aac',
+        'mpeg',
+        'mp4',
       ],
     );
     final path = picked?.files.single.path;
@@ -110,8 +165,9 @@ class _AddOutboundLeadScreenState extends ConsumerState<AddOutboundLeadScreen> {
         timeout: const Duration(minutes: 10),
         onTick: (s) {
           if (!mounted) return;
-          setState(() => _stageLabel =
-              '${_stageWord(s.currentStage)}… ${s.percent}%');
+          setState(
+            () => _stageLabel = '${_stageWord(s.currentStage)}… ${s.percent}%',
+          );
         },
       );
 
@@ -140,9 +196,13 @@ class _AddOutboundLeadScreenState extends ConsumerState<AddOutboundLeadScreen> {
 
   static String _describeUploadError(Object e) {
     if (e is ApiException) {
-      if (e.isNetworkError) return 'Network error — check your connection and retry.';
+      if (e.isNetworkError) {
+        return 'Network error — check your connection and retry.';
+      }
       if (e.isUnauthorized) return 'Session expired — please log in again.';
-      if (e.isServerError) return 'Server error while processing the recording. Please retry.';
+      if (e.isServerError) {
+        return 'Server error while processing the recording. Please retry.';
+      }
       return e.message;
     }
     return e.toString();
@@ -164,9 +224,18 @@ class _AddOutboundLeadScreenState extends ConsumerState<AddOutboundLeadScreen> {
   // ── Save lead ────────────────────────────────────────────────────────────
 
   Future<String?> _createLead() async {
+    // Synchronous guard checked before the first `await`, so "Save Lead" and
+    // "Save & Call" tapped in the same frame can't both pass this check and
+    // create two leads — `_saving` only becomes true once `setState` below
+    // actually runs, which is too late to catch a same-frame double-tap.
+    if (_saving) return null;
     final draft = ref.read(outboundLeadDraftProvider);
     if (draft.name.trim().isEmpty) {
       _toast('Name is required');
+      return null;
+    }
+    if (_phoneController.text.trim().length != 10) {
+      _toast('Enter a valid 10-digit phone number');
       return null;
     }
     setState(() => _saving = true);
@@ -193,7 +262,11 @@ class _AddOutboundLeadScreenState extends ConsumerState<AddOutboundLeadScreen> {
         final name = ref.read(outboundLeadDraftProvider).name.trim();
         context.go(
           '/leads/$key/calls/$_callId',
-          extra: CallDetailArgs(leadName: name, calledAt: _callDate, initialTab: 1),
+          extra: CallDetailArgs(
+            leadName: name,
+            calledAt: _callDate,
+            initialTab: 1,
+          ),
         );
       } else {
         context.pop();
@@ -217,8 +290,8 @@ class _AddOutboundLeadScreenState extends ConsumerState<AddOutboundLeadScreen> {
   Widget build(BuildContext context) {
     final draft = ref.watch(outboundLeadDraftProvider);
     final controller = ref.read(outboundLeadDraftProvider.notifier);
-    final busy = _phase == _UploadPhase.uploading ||
-        _phase == _UploadPhase.processing;
+    final busy =
+        _phase == _UploadPhase.uploading || _phase == _UploadPhase.processing;
 
     return Scaffold(
       backgroundColor: Colors.black.withValues(alpha: 0.72),
@@ -276,55 +349,68 @@ class _AddOutboundLeadScreenState extends ConsumerState<AddOutboundLeadScreen> {
                         child: LpTextField(
                           value: draft.name,
                           onChanged: controller.updateName,
+                          enabled: !_identityLocked,
                         ),
                       ),
                       const AppGap.md(),
                       FormShell(
                         label: 'Phone Number',
                         required: true,
-                        child: LpTextField(
-                          value: draft.phone,
-                          onChanged: controller.updatePhone,
-                          focused: true,
+                        optionalText: _identityLocked
+                            ? '(locked — matches the uploaded call)'
+                            : null,
+                        child: LpPhoneField(
+                          controller: _phoneController,
+                          enabled: !_identityLocked,
                         ),
                       ),
                       if (draft.hasDuplicate) ...[
                         const AppGap.xs(),
-                        Container(
-                          padding: const EdgeInsets.all(14),
-                          decoration: BoxDecoration(
-                            color: AppColors.warningSurface,
-                            borderRadius: BorderRadius.circular(8),
-                            border: Border.all(color: AppColors.warningBorder),
-                          ),
-                          child: Row(
-                            children: [
-                              const Icon(
-                                Icons.warning_amber,
-                                color: AppColors.tahitiGold,
+                        GestureDetector(
+                          behavior: HitTestBehavior.opaque,
+                          onTap: draft.dedupeContactKey == null
+                              ? null
+                              : () => context.go(
+                                  '/leads/${draft.dedupeContactKey}',
+                                ),
+                          child: Container(
+                            padding: const EdgeInsets.all(14),
+                            decoration: BoxDecoration(
+                              color: AppColors.warningSurface,
+                              borderRadius: BorderRadius.circular(8),
+                              border: Border.all(
+                                color: AppColors.warningBorder,
                               ),
-                              const AppGap.sm(axis: Axis.horizontal),
-                              Expanded(
-                                child: RichText(
-                                  text: TextSpan(
-                                    style: AppText.body14.copyWith(
-                                      color: AppColors.warningText,
-                                    ),
-                                    text:
-                                        'This number is already in your leads. ',
-                                    children: [
-                                      TextSpan(
-                                        text: 'View existing lead ->',
-                                        style: AppText.body14.copyWith(
-                                          color: AppColors.blueRibbon,
-                                          fontWeight: FontWeight.w700,
-                                        ),
+                            ),
+                            child: Row(
+                              children: [
+                                const Icon(
+                                  Icons.warning_amber,
+                                  color: AppColors.tahitiGold,
+                                ),
+                                const AppGap.sm(axis: Axis.horizontal),
+                                Expanded(
+                                  child: RichText(
+                                    text: TextSpan(
+                                      style: AppText.body14.copyWith(
+                                        color: AppColors.warningText,
                                       ),
-                                    ],
+                                      text:
+                                          'This number is already in your leads. ',
+                                      children: [
+                                        TextSpan(
+                                          text: 'View existing lead ->',
+                                          style: AppText.body14.copyWith(
+                                            color: AppColors.blueRibbon,
+                                            fontWeight: FontWeight.w700,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
                                   ),
                                 ),
-                              ),
-                            ],
+                              ],
+                            ),
                           ),
                         ),
                       ],
@@ -366,7 +452,9 @@ class _AddOutboundLeadScreenState extends ConsumerState<AddOutboundLeadScreen> {
                           onTap: busy ? null : _pickDate,
                           child: Container(
                             padding: const EdgeInsets.symmetric(
-                                horizontal: 15, vertical: 13),
+                              horizontal: 15,
+                              vertical: 13,
+                            ),
                             decoration: BoxDecoration(
                               color: AppColors.pampas,
                               borderRadius: BorderRadius.circular(8),
@@ -374,14 +462,22 @@ class _AddOutboundLeadScreenState extends ConsumerState<AddOutboundLeadScreen> {
                             ),
                             child: Row(
                               children: [
-                                const Icon(Icons.calendar_today_outlined,
-                                    size: 16, color: AppColors.schooner),
+                                const Icon(
+                                  Icons.calendar_today_outlined,
+                                  size: 16,
+                                  color: AppColors.schooner,
+                                ),
                                 const AppGap.sm(axis: Axis.horizontal),
-                                Text(_fmtDate(_callDate),
-                                    style: AppText.body14),
+                                Text(
+                                  _fmtDate(_callDate),
+                                  style: AppText.body14,
+                                ),
                                 const Spacer(),
-                                const Icon(Icons.keyboard_arrow_down,
-                                    size: 16, color: AppColors.schooner),
+                                const Icon(
+                                  Icons.keyboard_arrow_down,
+                                  size: 16,
+                                  color: AppColors.schooner,
+                                ),
                               ],
                             ),
                           ),
@@ -397,8 +493,10 @@ class _AddOutboundLeadScreenState extends ConsumerState<AddOutboundLeadScreen> {
                       ],
                       if (_phase == _UploadPhase.error) ...[
                         const AppGap.sm(),
-                        _ErrorPanel(message: _error ?? 'Upload failed',
-                            onRetry: _pickAndUpload),
+                        _ErrorPanel(
+                          message: _error ?? 'Upload failed',
+                          onRetry: _pickAndUpload,
+                        ),
                       ],
                     ],
                   ),
@@ -470,15 +568,15 @@ class _SourceDropdown extends StatelessWidget {
             'Select a source',
             style: AppText.body14.copyWith(color: AppColors.schooner),
           ),
-          icon: const Icon(Icons.keyboard_arrow_down, color: AppColors.schooner),
+          icon: const Icon(
+            Icons.keyboard_arrow_down,
+            color: AppColors.schooner,
+          ),
           style: AppText.body14.copyWith(color: AppColors.zeus),
           borderRadius: BorderRadius.circular(10),
           items: [
             for (final source in LeadSource.values)
-              DropdownMenuItem(
-                value: source,
-                child: Text(source.displayName),
-              ),
+              DropdownMenuItem(value: source, child: Text(source.displayName)),
           ],
           onChanged: (s) {
             if (s != null) onChanged(s.value);
@@ -505,8 +603,8 @@ class _RecordingDropzone extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final busy = phase == _UploadPhase.uploading ||
-        phase == _UploadPhase.processing;
+    final busy =
+        phase == _UploadPhase.uploading || phase == _UploadPhase.processing;
     final done = phase == _UploadPhase.done;
 
     return GestureDetector(
@@ -530,26 +628,34 @@ class _RecordingDropzone extends StatelessWidget {
                       child: CircularProgressIndicator(strokeWidth: 2.5),
                     ),
                     const AppGap.xs(),
-                    Text(stageLabel,
-                        style: AppText.body14
-                            .copyWith(fontWeight: FontWeight.w700)),
-                    Text('Keep this screen open',
-                        style: AppText.caption11
-                            .copyWith(color: AppColors.schooner)),
+                    Text(
+                      stageLabel,
+                      style: AppText.body14.copyWith(
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    Text(
+                      'Keep this screen open',
+                      style: AppText.caption11.copyWith(
+                        color: AppColors.schooner,
+                      ),
+                    ),
                   ],
                 )
               : Column(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
-                    Icon(done ? Icons.check_circle : Icons.upload,
-                        size: 28,
-                        color:
-                            done ? AppColors.greenHaze : AppColors.schooner),
+                    Icon(
+                      done ? Icons.check_circle : Icons.upload,
+                      size: 28,
+                      color: done ? AppColors.greenHaze : AppColors.schooner,
+                    ),
                     const AppGap.xs(),
                     Text(
                       fileName ?? 'Upload previous call recording',
-                      style:
-                          AppText.body14.copyWith(fontWeight: FontWeight.w700),
+                      style: AppText.body14.copyWith(
+                        fontWeight: FontWeight.w700,
+                      ),
                       textAlign: TextAlign.center,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
@@ -558,8 +664,9 @@ class _RecordingDropzone extends StatelessWidget {
                       done
                           ? 'Tap to replace'
                           : '.mp3, .wav, .m4a, .ogg, .opus - max 100 MB',
-                      style: AppText.caption11
-                          .copyWith(color: AppColors.schooner),
+                      style: AppText.caption11.copyWith(
+                        color: AppColors.schooner,
+                      ),
                       textAlign: TextAlign.center,
                     ),
                   ],
@@ -600,21 +707,28 @@ class _TranscriptResult extends StatelessWidget {
               const Spacer(),
               if (verdict != null && verdict!.isNotEmpty)
                 Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 10,
+                    vertical: 4,
+                  ),
                   decoration: BoxDecoration(
                     color: AppColors.white,
                     borderRadius: BorderRadius.circular(20),
                     border: Border.all(color: AppColors.westar),
                   ),
-                  child: Text(verdict!,
-                      style: AppText.caption11
-                          .copyWith(fontWeight: FontWeight.w700)),
+                  child: Text(
+                    verdict!,
+                    style: AppText.caption11.copyWith(
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
                 ),
             ],
           ),
-          Text('${turns.length} turns',
-              style: AppText.caption11.copyWith(color: AppColors.schooner)),
+          Text(
+            '${turns.length} turns',
+            style: AppText.caption11.copyWith(color: AppColors.schooner),
+          ),
           const AppGap.sm(),
           ConstrainedBox(
             constraints: const BoxConstraints(maxHeight: 220),
@@ -626,8 +740,9 @@ class _TranscriptResult extends StatelessWidget {
                 final t = turns[i];
                 final isAgent = t.speaker.toUpperCase() == 'AGENT';
                 return Align(
-                  alignment:
-                      isAgent ? Alignment.centerLeft : Alignment.centerRight,
+                  alignment: isAgent
+                      ? Alignment.centerLeft
+                      : Alignment.centerRight,
                   child: Container(
                     padding: const EdgeInsets.all(10),
                     constraints: const BoxConstraints(maxWidth: 300),
@@ -639,10 +754,13 @@ class _TranscriptResult extends StatelessWidget {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text(isAgent ? 'You' : 'Lead',
-                            style: AppText.caption11.copyWith(
-                                color: AppColors.schooner,
-                                fontWeight: FontWeight.w700)),
+                        Text(
+                          isAgent ? 'You' : 'Lead',
+                          style: AppText.caption11.copyWith(
+                            color: AppColors.schooner,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
                         Text(t.text, style: AppText.body14),
                       ],
                     ),
@@ -693,10 +811,12 @@ class _ErrorPanel extends StatelessWidget {
           const Icon(Icons.error_outline, color: AppColors.alizarin),
           const AppGap.sm(axis: Axis.horizontal),
           Expanded(
-            child: Text(message,
-                style: AppText.body14.copyWith(color: AppColors.alizarin),
-                maxLines: 3,
-                overflow: TextOverflow.ellipsis),
+            child: Text(
+              message,
+              style: AppText.body14.copyWith(color: AppColors.alizarin),
+              maxLines: 3,
+              overflow: TextOverflow.ellipsis,
+            ),
           ),
           TextButton(onPressed: onRetry, child: const Text('Retry')),
         ],

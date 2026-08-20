@@ -21,6 +21,7 @@ import '../services/local_call_store.dart';
 import '../services/local_follow_up_store.dart';
 import '../services/local_lead_override_store.dart';
 import '../services/native_call_log_service.dart';
+import '../services/notification_service.dart';
 import '../services/session_store.dart';
 import '../services/user_profile_store.dart';
 
@@ -541,6 +542,10 @@ class FollowUpController extends Notifier<List<FollowUpTask>> {
   Future<void> markDone(String id) async {
     final backendId = _backendIdFor(id);
     await ref.read(localFollowUpStoreProvider).markDone(id);
+    // The device alarm scheduled at creation time (see schedule_call_sheet.dart)
+    // has no idea the task is done — without this it fires on schedule anyway,
+    // showing a reminder for a follow-up the telecaller already completed.
+    await NotificationService.instance.cancel(NotificationService.notifIdFor(id));
     // Reflect immediately. A concurrent reconcile is safe here — "done" is
     // sticky, so even if the backend hasn't recorded it yet the local done
     // isn't reverted.
@@ -559,6 +564,9 @@ class FollowUpController extends Notifier<List<FollowUpTask>> {
   Future<void> delete(String id) async {
     final backendId = _backendIdFor(id);
     await ref.read(localFollowUpStoreProvider).delete(id);
+    // Same reasoning as markDone: the standing device alarm doesn't know the
+    // task was deleted and would otherwise still fire at the original time.
+    await NotificationService.instance.cancel(NotificationService.notifIdFor(id));
     // Reflect the removal immediately in memory.
     state = [
       for (final t in state)

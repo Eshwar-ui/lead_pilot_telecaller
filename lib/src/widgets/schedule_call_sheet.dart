@@ -146,7 +146,7 @@ class _ScheduleCallSheetState extends ConsumerState<ScheduleCallSheet> {
       // Schedule a device notification at the chosen time.
       if (!built.isOverdue) {
         await NotificationService.instance.scheduleFollowUp(
-          notifId: id.hashCode.abs() % 100000,
+          notifId: NotificationService.notifIdFor(id),
           title: 'Follow-up: ${widget.lead.name}',
           body: built.task.taskText,
           scheduledAt: built.scheduledAt,

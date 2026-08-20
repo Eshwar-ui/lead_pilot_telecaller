@@ -14,6 +14,11 @@ class NotificationService {
   final _plugin = FlutterLocalNotificationsPlugin();
   bool _ready = false;
 
+  /// Derives the local-notification id for a follow-up task id. Shared by the
+  /// scheduling call site and every cancellation call site so they can never
+  /// drift apart and leave a stale alarm uncancellable.
+  static int notifIdFor(String taskId) => taskId.hashCode.abs() % 100000;
+
   Future<void> init() async {
     tz.initializeTimeZones();
 

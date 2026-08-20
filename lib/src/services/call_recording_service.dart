@@ -159,7 +159,7 @@ class CallRecordingService {
     if (!_isAndroid) return null;
 
     final now = DateTime.now();
-    final digits = _phoneDigits(phoneHint);
+    final digits = phoneDigits(phoneHint);
     File? newest;
     DateTime? newestModified;
     File? newestMatch;
@@ -186,7 +186,7 @@ class CallRecordingService {
           newestModified = modified;
         }
         // Phone-matched candidate: filename (digits only) contains the number.
-        if (digits.isNotEmpty && _fileNameDigits(entry.path).contains(digits)) {
+        if (digits.isNotEmpty && fileNameDigits(entry.path).contains(digits)) {
           if (newestMatchModified == null ||
               modified.isAfter(newestMatchModified)) {
             newestMatch = entry;
@@ -244,13 +244,21 @@ class CallRecordingService {
 
   /// Last 10 digits of a phone number (drops +91 / spaces / separators) so a
   /// number matches regardless of how the dialer formatted it in the filename.
-  static String _phoneDigits(String? phone) {
+  ///
+  /// Public (not `_`-prefixed) so this — the single biggest cause of a call
+  /// attaching to the wrong lead if it's wrong — can be unit tested directly;
+  /// [findLatestRecording] itself can't be, since it scans real hardcoded
+  /// device paths and short-circuits to null off-Android.
+  static String phoneDigits(String? phone) {
     if (phone == null) return '';
     final d = phone.replaceAll(RegExp(r'\D'), '');
     return d.length > 10 ? d.substring(d.length - 10) : d;
   }
 
-  static String _fileNameDigits(String path) {
+  /// All digits in a recording's filename (OEM dialers embed the phone
+  /// number there), for matching against [phoneDigits]. Public for the same
+  /// testing reason as [phoneDigits].
+  static String fileNameDigits(String path) {
     final name = path.split(Platform.pathSeparator).last;
     return name.replaceAll(RegExp(r'\D'), '');
   }

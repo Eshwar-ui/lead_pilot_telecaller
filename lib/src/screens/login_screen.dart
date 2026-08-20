@@ -9,7 +9,6 @@ import 'package:flutter_app_utilities/flutter_app_utilities.dart'
 
 import '../core/api/api_exception.dart';
 import '../services/local_call_store.dart';
-import '../services/push_notification_service.dart';
 import '../services/session_store.dart';
 import '../services/user_profile_store.dart';
 import '../state/providers.dart';

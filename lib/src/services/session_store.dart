@@ -5,6 +5,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'push_notification_service.dart';
+
 /// The logged-in telecaller's identity + JWT. Models server identity (who is
 /// this, what org, what role) — deliberately separate from
 /// `user_profile_store.dart`, which only models local display preferences.
@@ -54,6 +56,11 @@ class SessionController extends Notifier<Session> {
     if (token == null || userJson == null) return;
     final user = jsonDecode(userJson) as Map<String, dynamic>;
     state = _sessionFrom(token, user);
+    // Also covers a cold app start with an already-logged-in session (not
+    // just a fresh login below) — the backend's stored FCM token could be
+    // stale from a reinstall, or never set if this device registered before
+    // push notifications existed.
+    unawaited(PushNotificationService.instance.registerTokenIfNeeded(token));
   }
 
   /// Called after a successful `POST /api/auth/login` with the raw response.
@@ -64,6 +71,7 @@ class SessionController extends Notifier<Session> {
     await _storage.write(key: _tokenKey, value: token);
     await _storage.write(key: _userKey, value: jsonEncode(user));
     state = _sessionFrom(token, user);
+    unawaited(PushNotificationService.instance.registerTokenIfNeeded(token));
   }
 
   /// Clears the JWT/user secret from secure storage *and* every locally

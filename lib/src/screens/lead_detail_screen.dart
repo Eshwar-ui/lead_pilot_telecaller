@@ -263,27 +263,10 @@ class _PipelineStripState extends ConsumerState<_PipelineStrip> {
   /// or correcting a wrong stage. Picking a backward stage requires a note
   /// (collected in a second step of the same sheet) before it's applied.
   Future<void> _openPicker(LeadStage current) async {
-    // Reversing a terminal decision — reopening a Lost/Junk lead straight to
-    // Won, or casting a Won deal back to Lost/Junk — is a bigger jump than an
-    // ordinary backward move within the working pipeline, so it must go
-    // through the same note-required flow below, not the no-note "Move to
-    // stage" list. A plain `index` comparison against `_working` alone
-    // wouldn't catch this, since Closed Won/Lost/Junk aren't part of `_working`.
-    final reopensToWon = current.isTerminalNegative;
-    final closesFromWon = current == LeadStage.closedWon;
-
-    final forward = <LeadStage>[
-      for (final s in _PipelineStrip._working)
-        if (s.index > current.index) s,
-      if (current != LeadStage.closedWon && !reopensToWon) LeadStage.closedWon,
-    ];
-    final backward = <LeadStage>[
-      for (final s in _PipelineStrip._working)
-        if (s.index < current.index) s,
-      if (reopensToWon) LeadStage.closedWon,
-      if (closesFromWon) ...[LeadStage.closedLost, LeadStage.junk],
-    ];
-    final canLose = !current.isTerminalNegative && !closesFromWon;
+    final options = computeStagePickerOptions(current, _PipelineStrip._working);
+    final forward = options.forward;
+    final backward = options.backward;
+    final canLose = options.canCloseWithoutNote;
 
     final result = await showModalBottomSheet<_StagePickerResult>(
       context: context,

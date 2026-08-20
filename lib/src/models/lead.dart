@@ -55,6 +55,65 @@ extension LeadStageX on LeadStage {
   };
 }
 
+/// The lists a "move to stage" picker should offer for [current] within a
+/// linear selling pipeline of [working] stages (Closed Won/Lost/Junk are
+/// terminal outcomes, not part of that linear progression).
+class StagePickerOptions {
+  const StagePickerOptions({
+    required this.forward,
+    required this.backward,
+    required this.canCloseWithoutNote,
+  });
+
+  /// Reachable with a single tap, no note required.
+  final List<LeadStage> forward;
+
+  /// Requires the note step before the move is applied — both an ordinary
+  /// backward move within [working], and any reversal of a terminal decision
+  /// (Lost/Junk -> Won, or Won -> Lost/Junk).
+  final List<LeadStage> backward;
+
+  /// Whether the no-note "Closed Lost / Junk" quick-close buttons should show.
+  final bool canCloseWithoutNote;
+}
+
+/// Pure classification used by [LeadDetailScreen]'s stage picker — pulled out
+/// of the widget so the forward/backward/note-required rules (in particular,
+/// the terminal-decision-reversal rule below) can be unit tested directly
+/// instead of only through a widget pump.
+StagePickerOptions computeStagePickerOptions(
+  LeadStage current,
+  List<LeadStage> working,
+) {
+  // Reversing a terminal decision — reopening a Lost/Junk lead straight to
+  // Won, or casting a Won deal back to Lost/Junk — is a bigger jump than an
+  // ordinary backward move within [working], so it must require a note too,
+  // not appear in the no-note forward list. A plain `index` comparison
+  // against [working] alone wouldn't catch this, since Closed Won/Lost/Junk
+  // aren't part of it.
+  final reopensToWon = current.isTerminalNegative;
+  final closesFromWon = current == LeadStage.closedWon;
+
+  final forward = <LeadStage>[
+    for (final s in working)
+      if (s.index > current.index) s,
+    if (current != LeadStage.closedWon && !reopensToWon) LeadStage.closedWon,
+  ];
+  final backward = <LeadStage>[
+    for (final s in working)
+      if (s.index < current.index) s,
+    if (reopensToWon) LeadStage.closedWon,
+    if (closesFromWon) ...[LeadStage.closedLost, LeadStage.junk],
+  ];
+  final canCloseWithoutNote = !current.isTerminalNegative && !closesFromWon;
+
+  return StagePickerOptions(
+    forward: forward,
+    backward: backward,
+    canCloseWithoutNote: canCloseWithoutNote,
+  );
+}
+
 extension LeadTemperatureX on LeadTemperature {
   /// Wire value used in API payloads, e.g. "hot".
   String get value => name;

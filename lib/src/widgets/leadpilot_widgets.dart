@@ -80,6 +80,17 @@ class LpTopBar extends StatelessWidget {
             onTap: onBack ?? () => Navigator.of(context).maybePop(),
           ),
           const AppGap(10, axis: Axis.horizontal),
+          Semantics(
+            label: 'Asan Innovators logo',
+            image: true,
+            child: Image.asset(
+              'assets/images/asan_logo.png',
+              width: 46,
+              height: 40,
+              fit: BoxFit.contain,
+            ),
+          ),
+          const AppGap(10, axis: Axis.horizontal),
           Expanded(
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
@@ -138,6 +149,17 @@ class LpTabHeader extends StatelessWidget {
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.center,
         children: [
+          Semantics(
+            label: 'Asan Innovators logo',
+            image: true,
+            child: Image.asset(
+              'assets/images/asan_logo.png',
+              width: 52,
+              height: 42,
+              fit: BoxFit.contain,
+            ),
+          ),
+          const SizedBox(width: 12),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -156,10 +178,7 @@ class LpTabHeader extends StatelessWidget {
               ],
             ),
           ),
-          for (final action in actions) ...[
-            const SizedBox(width: 10),
-            action,
-          ],
+          for (final action in actions) ...[const SizedBox(width: 10), action],
         ],
       ),
     );
@@ -395,24 +414,41 @@ class LeadSummaryCard extends StatelessWidget {
                   Row(
                     children: [
                       if (totalCalls != null) ...[
-                        const Icon(Icons.call_outlined, size: 12, color: AppColors.schooner),
+                        const Icon(
+                          Icons.call_outlined,
+                          size: 12,
+                          color: AppColors.schooner,
+                        ),
                         const AppGap(4, axis: Axis.horizontal),
                         Text(
                           '$totalCalls call${totalCalls == 1 ? '' : 's'}',
-                          style: AppText.caption11.copyWith(color: AppColors.schooner),
+                          style: AppText.caption11.copyWith(
+                            color: AppColors.schooner,
+                          ),
                         ),
                       ],
                       if (totalCalls != null && lastContactLabel != null)
                         Padding(
                           padding: const EdgeInsets.symmetric(horizontal: 6),
-                          child: Text('·', style: AppText.caption11.copyWith(color: AppColors.tide)),
+                          child: Text(
+                            '·',
+                            style: AppText.caption11.copyWith(
+                              color: AppColors.tide,
+                            ),
+                          ),
                         ),
                       if (lastContactLabel != null) ...[
-                        const Icon(Icons.access_time_outlined, size: 12, color: AppColors.schooner),
+                        const Icon(
+                          Icons.access_time_outlined,
+                          size: 12,
+                          color: AppColors.schooner,
+                        ),
                         const AppGap(4, axis: Axis.horizontal),
                         Text(
                           'Last contact $lastContactLabel',
-                          style: AppText.caption11.copyWith(color: AppColors.schooner),
+                          style: AppText.caption11.copyWith(
+                            color: AppColors.schooner,
+                          ),
                         ),
                       ],
                     ],
@@ -635,8 +671,8 @@ class PrimaryButton extends StatelessWidget {
           boxShadow: (onTap == null && !loading)
               ? null
               : (color == AppColors.blueRibbon
-                  ? AppShadows.blueAction
-                  : AppShadows.card),
+                    ? AppShadows.blueAction
+                    : AppShadows.card),
         ),
         child: loading
             ? const Center(
@@ -725,7 +761,8 @@ class SecondaryButton extends StatelessWidget {
                 children: [
                   if (icon != null) ...[
                     Icon(icon, size: 18, color: AppColors.merlin),
-                    if (label.isNotEmpty) const AppGap.xs(axis: Axis.horizontal),
+                    if (label.isNotEmpty)
+                      const AppGap.xs(axis: Axis.horizontal),
                   ],
                   if (label.isNotEmpty)
                     Flexible(
@@ -733,7 +770,9 @@ class SecondaryButton extends StatelessWidget {
                         label,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
-                        style: AppText.body14.copyWith(fontWeight: FontWeight.w600),
+                        style: AppText.body14.copyWith(
+                          fontWeight: FontWeight.w600,
+                        ),
                       ),
                     ),
                 ],
@@ -917,7 +956,10 @@ class LpPhoneField extends StatelessWidget {
         isDense: true,
         filled: true,
         fillColor: AppColors.pampas,
-        contentPadding: const EdgeInsets.symmetric(horizontal: 15, vertical: 15),
+        contentPadding: const EdgeInsets.symmetric(
+          horizontal: 15,
+          vertical: 15,
+        ),
         prefixIcon: Padding(
           padding: const EdgeInsets.only(left: 15, right: 8),
           child: Center(
@@ -978,7 +1020,11 @@ class LpErrorState extends StatelessWidget {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Icon(Icons.error_outline, color: AppColors.alizarin, size: 32),
+            const Icon(
+              Icons.error_outline,
+              color: AppColors.alizarin,
+              size: 32,
+            ),
             const AppGap.sm(),
             Text(
               message,
@@ -1001,7 +1047,11 @@ class LpErrorState extends StatelessWidget {
 /// they're looking at isn't necessarily live, with a one-tap retry. Meant to
 /// sit above the (still-visible) fallback content, not replace it.
 class LpFallbackBanner extends StatelessWidget {
-  const LpFallbackBanner({super.key, required this.onRetry, this.message = 'Showing cached data'});
+  const LpFallbackBanner({
+    super.key,
+    required this.onRetry,
+    this.message = 'Showing cached data',
+  });
 
   final String message;
   final VoidCallback onRetry;
@@ -1010,11 +1060,18 @@ class LpFallbackBanner extends StatelessWidget {
   Widget build(BuildContext context) {
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md, vertical: AppSpacing.xs),
+      padding: const EdgeInsets.symmetric(
+        horizontal: AppSpacing.md,
+        vertical: AppSpacing.xs,
+      ),
       color: AppColors.warningSurface,
       child: Row(
         children: [
-          const Icon(Icons.cloud_off_outlined, size: 14, color: AppColors.warningText),
+          const Icon(
+            Icons.cloud_off_outlined,
+            size: 14,
+            color: AppColors.warningText,
+          ),
           const AppGap.xs(axis: Axis.horizontal),
           Expanded(
             child: Text(

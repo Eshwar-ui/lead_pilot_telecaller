@@ -1,11 +1,11 @@
 {
-    "name": "lead_pilot_telecaller",
-    "short_name": "lead_pilot_telecaller",
+    "name": "Asan Telecaller",
+    "short_name": "Asan",
     "start_url": ".",
     "display": "standalone",
-    "background_color": "#0175C2",
-    "theme_color": "#0175C2",
-    "description": "A new Flutter project.",
+    "background_color": "#FAF8F5",
+    "theme_color": "#FAF8F5",
+    "description": "Asan Innovators telecaller workspace.",
     "orientation": "portrait-primary",
     "prefer_related_applications": false,
     "icons": [

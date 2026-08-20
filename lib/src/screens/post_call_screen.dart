@@ -17,12 +17,14 @@ import '../theme/app_colors.dart';
 import '../theme/app_spacing.dart';
 import '../theme/app_theme.dart';
 import '../widgets/leadpilot_widgets.dart';
+import 'call_detail_screen.dart';
 
 class PostCallScreen extends ConsumerStatefulWidget {
   const PostCallScreen({
     super.key,
     required this.leadId,
     this.isNewCall = false,
+    this.captureOnOpen = false,
   });
 
   final String leadId;
@@ -31,6 +33,11 @@ class PostCallScreen extends ConsumerStatefulWidget {
   /// [PreCallScreen]. Causes the capture state to reset so a fresh recording
   /// is scanned for, rather than re-using the previous call's file.
   final bool isNewCall;
+
+  /// True when native overlay navigation opened this screen after the call.
+  /// Normal in-app navigation reaches this screen while the dialler is still
+  /// active and must wait for the resumed lifecycle event before scanning.
+  final bool captureOnOpen;
 
   @override
   ConsumerState<PostCallScreen> createState() => _PostCallScreenState();
@@ -42,12 +49,17 @@ class _PostCallScreenState extends ConsumerState<PostCallScreen>
   Timer? _renderTimer;
   int _selectedTab = 0;
   bool _rendering = true;
+  bool _openingSavedCallDetail = false;
+  late bool _newCallStateReady;
 
   static const _tabs = ['Summary', 'Score', 'Transcript'];
 
   @override
   void initState() {
     super.initState();
+    // Block auto-navigation during the first build. Riverpod state cannot be
+    // reset from initState, so the actual reset happens post-frame below.
+    _newCallStateReady = !widget.isNewCall;
     WidgetsBinding.instance.addObserver(this);
     _renderController = AnimationController(
       vsync: this,
@@ -58,16 +70,21 @@ class _PostCallScreenState extends ConsumerState<PostCallScreen>
       setState(() => _rendering = false);
       _renderController.stop();
     });
-    _syncCallNotes(stopOverlay: widget.isNewCall);
+    // Do not stop the overlay here. This screen is pushed immediately after
+    // launching the dialler, while the call is still starting; stopping the
+    // service now removes the notes bubble before it can ever be shown.
+    _syncCallNotes();
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       final notifier = ref.read(callCaptureProvider.notifier);
       if (widget.isNewCall) {
-        // Clear any recording/transcript from a previous call so the fresh
-        // recording is picked up when the user returns from the dialer.
+        // Now that the first frame is complete, safely clear the previous
+        // call before allowing the latest-call redirect to run.
         notifier.resetForNewCall(widget.leadId);
-        // Scan immediately — will return notFound since the call hasn't
-        // ended yet. The resumed lifecycle event will re-scan and find it.
-        notifier.captureLatest(widget.leadId);
+        if (!mounted) return;
+        setState(() => _newCallStateReady = true);
+        if (widget.captureOnOpen) {
+          unawaited(_captureWithRetries());
+        }
       } else {
         // Viewing history — restore the last saved transcript if available.
         await notifier.restoreSaved(widget.leadId);
@@ -86,7 +103,10 @@ class _PostCallScreenState extends ConsumerState<PostCallScreen>
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
-      _syncCallNotes();
+      // The user has actually returned from the dialler now. Read the notes
+      // first, then stop any overlay service that did not already stop itself
+      // through the phone-state listener.
+      _syncCallNotes(stopOverlay: true);
       // Returning from the call screen — the recording should exist by now.
       // Some OEM dialers flush the file a second or two after the call ends, so
       // a single scan on resume can miss it (the reported "have to upload
@@ -124,13 +144,41 @@ class _PostCallScreenState extends ConsumerState<PostCallScreen>
   }
 
   Future<void> _syncCallNotes({bool stopOverlay = false}) async {
+    final notes = await getNativeCallNotes(widget.leadId);
+
     if (stopOverlay) {
       await stopCallNotesBubble();
     }
 
-    final notes = await getNativeCallNotes(widget.leadId);
     if (!mounted) return;
     ref.read(callNotesProvider.notifier).setNotes(widget.leadId, notes);
+  }
+
+  /// The post-call screen is only a capture/progress surface. Once the
+  /// recording is processed, continue into the persisted Call Details route
+  /// so the user gets the complete transcript UI, including "View English".
+  void _openSavedCallDetailWhenReady(CallCaptureState? capture, Lead lead) {
+    if (!widget.isNewCall || !_newCallStateReady || _openingSavedCallDetail) {
+      return;
+    }
+    final callId = capture?.transcription?.callId;
+    if (capture?.status != CaptureStatus.transcribed ||
+        callId == null ||
+        callId.isEmpty) {
+      return;
+    }
+
+    _openingSavedCallDetail = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      context.pushReplacement(
+        '/leads/${widget.leadId}/calls/$callId',
+        extra: CallDetailArgs(
+          leadName: lead.name,
+          calledAt: capture?.recording?.recordedAt,
+        ),
+      );
+    });
   }
 
   @override
@@ -145,26 +193,32 @@ class _PostCallScreenState extends ConsumerState<PostCallScreen>
     final analysis = capture?.transcription?.analysis;
     final isAnalysing = capture?.status == CaptureStatus.transcribing;
 
+    _openSavedCallDetailWhenReady(capture, lead);
+
     return Scaffold(
       backgroundColor: AppColors.springWood,
       bottomNavigationBar: SafeArea(
         child: Padding(
-          padding: const EdgeInsets.fromLTRB(AppSpacing.md, AppSpacing.xs, AppSpacing.md, AppSpacing.sm),
+          padding: const EdgeInsets.fromLTRB(
+            AppSpacing.md,
+            AppSpacing.xs,
+            AppSpacing.md,
+            AppSpacing.sm,
+          ),
           child: Row(
             children: [
               Expanded(
                 child: OutlinedButton.icon(
                   icon: const Icon(Icons.calendar_today_outlined, size: 16),
                   label: const Text('Schedule Follow-up'),
-                  onPressed: () => ScheduleCallSheet.show(
-                    context,
-                    lead,
-                    daysAhead: 2,
-                  ),
+                  onPressed: () =>
+                      ScheduleCallSheet.show(context, lead, daysAhead: 2),
                   style: OutlinedButton.styleFrom(
                     foregroundColor: AppColors.blueRibbon,
                     side: BorderSide(color: AppColors.blueRibbon),
-                    padding: const EdgeInsets.symmetric(vertical: AppSpacing.sm),
+                    padding: const EdgeInsets.symmetric(
+                      vertical: AppSpacing.sm,
+                    ),
                     shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(AppRadius.md),
                     ),
@@ -180,7 +234,9 @@ class _PostCallScreenState extends ConsumerState<PostCallScreen>
                   style: ElevatedButton.styleFrom(
                     backgroundColor: AppColors.blueRibbon,
                     foregroundColor: AppColors.white,
-                    padding: const EdgeInsets.symmetric(vertical: AppSpacing.sm),
+                    padding: const EdgeInsets.symmetric(
+                      vertical: AppSpacing.sm,
+                    ),
                     shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(AppRadius.md),
                     ),
@@ -235,7 +291,12 @@ class _CallDetailHeader extends StatelessWidget {
   Widget build(BuildContext context) {
     return Container(
       color: AppColors.white,
-      padding: const EdgeInsets.fromLTRB(AppSpacing.md, AppSpacing.sm, AppSpacing.md, AppSpacing.lg),
+      padding: const EdgeInsets.fromLTRB(
+        AppSpacing.md,
+        AppSpacing.sm,
+        AppSpacing.md,
+        AppSpacing.lg,
+      ),
       child: Column(
         children: [
           Row(
@@ -425,7 +486,12 @@ class _SummaryTab extends StatelessWidget {
     final showSkeleton = analysis == null && (rendering || isAnalysing);
     if (showSkeleton) {
       return ListView(
-        padding: const EdgeInsets.fromLTRB(AppSpacing.md, AppSpacing.md, AppSpacing.md, AppSpacing.xxl),
+        padding: const EdgeInsets.fromLTRB(
+          AppSpacing.md,
+          AppSpacing.md,
+          AppSpacing.md,
+          AppSpacing.xxl,
+        ),
         children: [
           _CallRecordingCard(leadId: lead.id),
           const AppGap.md(),
@@ -438,7 +504,12 @@ class _SummaryTab extends StatelessWidget {
 
     final a = analysis;
     return ListView(
-      padding: const EdgeInsets.fromLTRB(AppSpacing.md, AppSpacing.md, AppSpacing.md, AppSpacing.xxl),
+      padding: const EdgeInsets.fromLTRB(
+        AppSpacing.md,
+        AppSpacing.md,
+        AppSpacing.md,
+        AppSpacing.xxl,
+      ),
       children: [
         _CallRecordingCard(leadId: lead.id),
         const AppGap.md(),
@@ -689,10 +760,7 @@ class _KeyPointsCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final capturedNotes = notes.trim();
-    final points = [
-      ...keyPoints,
-      if (capturedNotes.isNotEmpty) capturedNotes,
-    ];
+    final points = [...keyPoints, if (capturedNotes.isNotEmpty) capturedNotes];
 
     return LpCard(
       padding: const EdgeInsets.all(AppSpacing.md),
@@ -759,7 +827,12 @@ class _NextStepsSection extends StatelessWidget {
           Padding(
             padding: const EdgeInsets.only(bottom: AppSpacing.xs),
             child: LpCard(
-              padding: const EdgeInsets.fromLTRB(AppSpacing.sm, AppSpacing.sm, AppSpacing.sm, AppSpacing.sm),
+              padding: const EdgeInsets.fromLTRB(
+                AppSpacing.sm,
+                AppSpacing.sm,
+                AppSpacing.sm,
+                AppSpacing.sm,
+              ),
               child: Row(
                 children: [
                   Container(
@@ -836,7 +909,10 @@ class _NextStepAction extends StatelessWidget {
     return TapScale(
       onTap: onTap,
       child: LpCard(
-        padding: const EdgeInsets.symmetric(horizontal: AppSpacing.sm, vertical: AppSpacing.sm),
+        padding: const EdgeInsets.symmetric(
+          horizontal: AppSpacing.sm,
+          vertical: AppSpacing.sm,
+        ),
         child: Row(
           children: [
             Container(
@@ -880,7 +956,12 @@ class _ScoreTab extends StatelessWidget {
     final a = analysis;
     if (a == null) {
       return ListView(
-        padding: const EdgeInsets.fromLTRB(AppSpacing.md, AppSpacing.md, AppSpacing.md, AppSpacing.xxl),
+        padding: const EdgeInsets.fromLTRB(
+          AppSpacing.md,
+          AppSpacing.md,
+          AppSpacing.md,
+          AppSpacing.xxl,
+        ),
         children: const [
           _AwaitingAnalysisCard(
             message:
@@ -900,7 +981,12 @@ class _ScoreTab extends StatelessWidget {
     ];
 
     return ListView(
-      padding: const EdgeInsets.fromLTRB(AppSpacing.md, AppSpacing.md, AppSpacing.md, AppSpacing.xxl),
+      padding: const EdgeInsets.fromLTRB(
+        AppSpacing.md,
+        AppSpacing.md,
+        AppSpacing.md,
+        AppSpacing.xxl,
+      ),
       children: [
         GridView.count(
           crossAxisCount: 2,
@@ -936,7 +1022,10 @@ class _ScoreTab extends StatelessWidget {
             good: b.good,
           ),
         const AppGap.md(),
-        _ScoreSentimentCard(note: a.sentimentNote, segments: a.sentimentTimeline),
+        _ScoreSentimentCard(
+          note: a.sentimentNote,
+          segments: a.sentimentTimeline,
+        ),
       ],
     );
   }
@@ -1064,7 +1153,10 @@ class _ScoreTag extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: AppSpacing.sm, vertical: AppSpacing.xxs),
+      padding: const EdgeInsets.symmetric(
+        horizontal: AppSpacing.sm,
+        vertical: AppSpacing.xxs,
+      ),
       decoration: BoxDecoration(
         color: AppColors.pampas,
         borderRadius: BorderRadius.circular(AppRadius.pill),
@@ -1262,14 +1354,20 @@ class _TranscriptTabState extends ConsumerState<_TranscriptTab> {
       return const _TranscriptEmptyState();
     }
 
-    // Heuristic: the first speaker is the telecaller ("You"); the other is the
-    // lead. speakerId is the diarization label returned by the backend ("0"/"1").
-    final firstSpeaker = transcription.entries.first.speakerId;
-    final hasEnglish =
-        transcription.entries.any((e) => (e.textEn ?? '').trim().isNotEmpty);
+    // TranscriptionService normalises backend AGENT to speakerId "0" and USER
+    // to "1". Do not infer roles from who happens to speak first: many dialer
+    // recordings begin with the lead saying hello.
+    final hasEnglish = transcription.entries.any(
+      (e) => (e.textEn ?? '').trim().isNotEmpty,
+    );
 
     return ListView(
-      padding: const EdgeInsets.fromLTRB(AppSpacing.md, AppSpacing.md, AppSpacing.md, AppSpacing.xxl),
+      padding: const EdgeInsets.fromLTRB(
+        AppSpacing.md,
+        AppSpacing.md,
+        AppSpacing.md,
+        AppSpacing.xxl,
+      ),
       children: [
         Wrap(
           spacing: 8,
@@ -1293,12 +1391,12 @@ class _TranscriptTabState extends ConsumerState<_TranscriptTab> {
         const AppGap.xs(),
         for (final entry in transcription.entries)
           _MessageBubble(
-            speaker: entry.speakerId == firstSpeaker ? 'You' : lead.name,
+            speaker: entry.speakerId == '0' ? 'You' : lead.name,
             time: _formatTimestamp(entry.start),
             text: _showEnglish && (entry.textEn ?? '').trim().isNotEmpty
                 ? entry.textEn!.trim()
                 : entry.text,
-            outgoing: entry.speakerId == firstSpeaker,
+            outgoing: entry.speakerId == '0',
           ),
       ],
     );
@@ -1336,7 +1434,10 @@ class _TranscriptLanguageToggle extends StatelessWidget {
             behavior: HitTestBehavior.opaque,
             onTap: onToggle,
             child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: AppSpacing.sm, vertical: AppSpacing.xs),
+              padding: const EdgeInsets.symmetric(
+                horizontal: AppSpacing.sm,
+                vertical: AppSpacing.xs,
+              ),
               decoration: BoxDecoration(
                 color: AppColors.white,
                 borderRadius: BorderRadius.circular(AppRadius.xs),
@@ -1397,7 +1498,10 @@ class _MetaChip extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: AppSpacing.sm, vertical: AppSpacing.xs),
+      padding: const EdgeInsets.symmetric(
+        horizontal: AppSpacing.sm,
+        vertical: AppSpacing.xs,
+      ),
       decoration: BoxDecoration(
         color: AppColors.pampas,
         borderRadius: BorderRadius.circular(AppRadius.pill),
@@ -1749,7 +1853,10 @@ class _RecordingActionButton extends StatelessWidget {
       behavior: HitTestBehavior.opaque,
       onTap: onTap,
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md, vertical: AppSpacing.xs),
+        padding: const EdgeInsets.symmetric(
+          horizontal: AppSpacing.md,
+          vertical: AppSpacing.xs,
+        ),
         decoration: BoxDecoration(
           color: filled ? AppColors.blueRibbon : AppColors.ribbonSurface,
           borderRadius: BorderRadius.circular(AppRadius.sm),

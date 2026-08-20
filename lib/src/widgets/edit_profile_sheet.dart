@@ -6,7 +6,8 @@ import '../theme/app_colors.dart';
 import '../theme/app_theme.dart';
 import 'leadpilot_widgets.dart';
 
-/// Bottom sheet to edit the telecaller's own profile (name, role, company).
+/// Bottom sheet to edit the telecaller's own display name. Role and company
+/// come from the assigned account and organisation, so they stay read-only.
 class EditProfileSheet extends ConsumerStatefulWidget {
   const EditProfileSheet({super.key, required this.profile});
 
@@ -29,23 +30,17 @@ class EditProfileSheet extends ConsumerStatefulWidget {
 
 class _EditProfileSheetState extends ConsumerState<EditProfileSheet> {
   late final TextEditingController _name;
-  late final TextEditingController _role;
-  late final TextEditingController _company;
   bool _saving = false;
 
   @override
   void initState() {
     super.initState();
     _name = TextEditingController(text: widget.profile.name);
-    _role = TextEditingController(text: widget.profile.role);
-    _company = TextEditingController(text: widget.profile.company);
   }
 
   @override
   void dispose() {
     _name.dispose();
-    _role.dispose();
-    _company.dispose();
     super.dispose();
   }
 
@@ -60,13 +55,7 @@ class _EditProfileSheetState extends ConsumerState<EditProfileSheet> {
     try {
       await ref
           .read(userProfileProvider.notifier)
-          .update(
-            widget.profile.copyWith(
-              name: _name.text.trim(),
-              role: _role.text.trim(),
-              company: _company.text.trim(),
-            ),
-          );
+          .update(widget.profile.copyWith(name: _name.text.trim()));
       if (mounted) Navigator.of(context).pop();
     } catch (_) {
       if (mounted) {
@@ -106,12 +95,13 @@ class _EditProfileSheetState extends ConsumerState<EditProfileSheet> {
             ),
           ),
           Text('Edit profile', style: AppText.display20.copyWith(fontSize: 18)),
+          const SizedBox(height: 4),
+          Text(
+            'Update the name shown in this app.',
+            style: AppText.body13.copyWith(color: AppColors.schooner),
+          ),
           const SizedBox(height: 16),
           _Field(label: 'Name', controller: _name),
-          const SizedBox(height: 14),
-          _Field(label: 'Role', controller: _role),
-          const SizedBox(height: 14),
-          _Field(label: 'Company', controller: _company),
           const SizedBox(height: 22),
           SizedBox(
             width: double.infinity,

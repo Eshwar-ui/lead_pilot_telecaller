@@ -232,20 +232,21 @@ class _UserCard extends ConsumerWidget {
       ),
       child: Row(
         children: [
-          Container(
-            width: 56,
-            height: 56,
-            decoration: const BoxDecoration(
-              color: AppColors.blueRibbon,
-              shape: BoxShape.circle,
-            ),
-            child: Center(
-              child: Text(
-                profile.initials,
-                style: AppText.display16.copyWith(
-                  color: AppColors.white,
-                  fontSize: 18,
-                ),
+          Semantics(
+            label: 'Asan Innovators logo',
+            image: true,
+            child: Container(
+              width: 56,
+              height: 56,
+              padding: const EdgeInsets.all(4),
+              decoration: BoxDecoration(
+                color: AppColors.white,
+                borderRadius: BorderRadius.circular(AppRadius.lg),
+                border: Border.all(color: AppColors.westar),
+              ),
+              child: Image.asset(
+                'assets/images/asan_logo.png',
+                fit: BoxFit.contain,
               ),
             ),
           ),
@@ -342,16 +343,14 @@ class _OrgLogo extends StatelessWidget {
   Widget build(BuildContext context) {
     const size = 44.0;
     if (url == null || url!.isEmpty) {
-      return Container(
-        width: size,
-        height: size,
-        decoration: BoxDecoration(
-          color: AppColors.pampas,
-          borderRadius: BorderRadius.circular(AppRadius.md),
-          border: Border.all(color: AppColors.westar),
+      return ClipRRect(
+        borderRadius: BorderRadius.circular(AppRadius.md),
+        child: Image.asset(
+          'assets/images/asan_logo.png',
+          width: size,
+          height: size,
+          fit: BoxFit.cover,
         ),
-        child: const Icon(Icons.business_outlined,
-            size: 20, color: AppColors.schooner),
       );
     }
     return ClipRRect(

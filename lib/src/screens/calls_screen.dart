@@ -44,35 +44,27 @@ class _CallsScreenState extends ConsumerState<CallsScreen> {
     var callLog = q.isEmpty
         ? allCalls
         : allCalls
-            .where((e) =>
-                e.leadName.toLowerCase().contains(q) ||
-                e.phone.toLowerCase().contains(q))
-            .toList();
+              .where(
+                (e) =>
+                    e.leadName.toLowerCase().contains(q) ||
+                    e.phone.toLowerCase().contains(q),
+              )
+              .toList();
     if (_direction != 'All') {
       final wantInbound = _direction == 'Inbound';
       callLog = callLog.where((e) => e.isInbound == wantInbound).toList();
     }
     final syncState = ref.watch(callLogSyncProvider);
-
-    // Group by date section label
-    final today = <CallLogEntry>[];
-    final yesterday = <CallLogEntry>[];
-    final older = <CallLogEntry>[];
-    final n = DateTime.now();
-    final now = DateTime(n.year, n.month, n.day);
-
-    for (final entry in callLog) {
-      final days = now
-          .difference(DateTime(entry.calledAt.year, entry.calledAt.month, entry.calledAt.day))
-          .inDays;
-      if (days == 0) {
-        today.add(entry);
-      } else if (days == 1) {
-        yesterday.add(entry);
-      } else {
-        older.add(entry);
-      }
-    }
+    final leadCalls = [
+      for (final entry in callLog)
+        if (entry.leadId != null) entry,
+    ];
+    final phoneLogCalls = [
+      for (final entry in callLog)
+        if (entry.leadId == null) entry,
+    ];
+    final allLeadCalls = allCalls.where((entry) => entry.leadId != null).length;
+    final allPhoneLogCalls = allCalls.length - allLeadCalls;
 
     return Scaffold(
       backgroundColor: AppColors.springWood,
@@ -83,7 +75,9 @@ class _CallsScreenState extends ConsumerState<CallsScreen> {
             // ── Header ────────────────────────────────────────────────────
             LpTabHeader(
               title: 'My Calls',
-              subtitle: '${allCalls.length} call${allCalls.length == 1 ? '' : 's'} logged',
+              subtitle:
+                  '$allLeadCalls lead call${allLeadCalls == 1 ? '' : 's'} · '
+                  '$allPhoneLogCalls phone log${allPhoneLogCalls == 1 ? '' : 's'}',
               actions: [
                 _DirectionFilterButton(
                   active: _direction,
@@ -109,8 +103,9 @@ class _CallsScreenState extends ConsumerState<CallsScreen> {
 
             if (syncState.checked && !syncState.permissionGranted)
               _CallLogPermissionCard(
-                onEnable: () =>
-                    ref.read(callLogSyncProvider.notifier).requestPermissionAndSync(),
+                onEnable: () => ref
+                    .read(callLogSyncProvider.notifier)
+                    .requestPermissionAndSync(),
               ),
 
             if (_searching)
@@ -126,8 +121,11 @@ class _CallsScreenState extends ConsumerState<CallsScreen> {
                   ),
                   child: Row(
                     children: [
-                      const Icon(Icons.search,
-                          size: 16, color: AppColors.schooner),
+                      const Icon(
+                        Icons.search,
+                        size: 16,
+                        color: AppColors.schooner,
+                      ),
                       const SizedBox(width: 9),
                       Expanded(
                         child: TextField(
@@ -139,8 +137,9 @@ class _CallsScreenState extends ConsumerState<CallsScreen> {
                             isCollapsed: true,
                             border: InputBorder.none,
                             hintText: 'Search calls...',
-                            hintStyle: AppText.body14
-                                .copyWith(color: AppColors.boulder),
+                            hintStyle: AppText.body14.copyWith(
+                              color: AppColors.boulder,
+                            ),
                           ),
                         ),
                       ),
@@ -154,48 +153,61 @@ class _CallsScreenState extends ConsumerState<CallsScreen> {
             // ── Stats (computed from real data) ───────────────────────────
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16),
-              child: Builder(builder: (_) {
-                final now = DateTime.now();
-                final thisMonth = callLog.where((e) =>
-                    e.calledAt.year == now.year &&
-                    e.calledAt.month == now.month).toList();
-                final avgScore = callLog.isEmpty
-                    ? 0
-                    : (callLog.map((e) => e.score).fold(0, (a, b) => a + b) ~/
-                        callLog.length);
-                final totalSecs = callLog.fold(0, (a, e) => a + e.duration.inSeconds);
-                final avgSecs = callLog.isEmpty ? 0 : totalSecs ~/ callLog.length;
-                final avgDur =
-                    '${(avgSecs ~/ 60).toString().padLeft(2, '0')}:${(avgSecs % 60).toString().padLeft(2, '0')}';
-                return Row(
-                  children: [
-                    Expanded(
-                      child: MetricTile(
-                        label: 'This Month',
-                        value: '${thisMonth.length}',
-                        mono: true,
+              child: Builder(
+                builder: (_) {
+                  final now = DateTime.now();
+                  final thisMonth = callLog
+                      .where(
+                        (e) =>
+                            e.calledAt.year == now.year &&
+                            e.calledAt.month == now.month,
+                      )
+                      .toList();
+                  final avgScore = leadCalls.isEmpty
+                      ? 0
+                      : (leadCalls
+                                .map((e) => e.score)
+                                .fold(0, (a, b) => a + b) ~/
+                            leadCalls.length);
+                  final totalSecs = callLog.fold(
+                    0,
+                    (a, e) => a + e.duration.inSeconds,
+                  );
+                  final avgSecs = callLog.isEmpty
+                      ? 0
+                      : totalSecs ~/ callLog.length;
+                  final avgDur =
+                      '${(avgSecs ~/ 60).toString().padLeft(2, '0')}:${(avgSecs % 60).toString().padLeft(2, '0')}';
+                  return Row(
+                    children: [
+                      Expanded(
+                        child: MetricTile(
+                          label: 'This Month',
+                          value: '${thisMonth.length}',
+                          mono: true,
+                        ),
                       ),
-                    ),
-                    const SizedBox(width: 6),
-                    Expanded(
-                      child: MetricTile(
-                        label: 'Avg Score',
-                        value: callLog.isEmpty ? '—' : '$avgScore',
-                        valueColor: AppColors.salem,
-                        mono: true,
+                      const SizedBox(width: 6),
+                      Expanded(
+                        child: MetricTile(
+                          label: 'Lead Score',
+                          value: leadCalls.isEmpty ? '—' : '$avgScore',
+                          valueColor: AppColors.salem,
+                          mono: true,
+                        ),
                       ),
-                    ),
-                    const SizedBox(width: 6),
-                    Expanded(
-                      child: MetricTile(
-                        label: 'Avg Duration',
-                        value: callLog.isEmpty ? '—' : avgDur,
-                        mono: true,
+                      const SizedBox(width: 6),
+                      Expanded(
+                        child: MetricTile(
+                          label: 'Avg Duration',
+                          value: callLog.isEmpty ? '—' : avgDur,
+                          mono: true,
+                        ),
                       ),
-                    ),
-                  ],
-                );
-              }),
+                    ],
+                  );
+                },
+              ),
             ),
 
             const SizedBox(height: AppSpacing.sm),
@@ -212,8 +224,11 @@ class _CallsScreenState extends ConsumerState<CallsScreen> {
                       padding: const EdgeInsets.only(top: 60),
                       child: Column(
                         children: [
-                          const Icon(Icons.call_outlined,
-                              size: 40, color: AppColors.tide),
+                          const Icon(
+                            Icons.call_outlined,
+                            size: 40,
+                            color: AppColors.tide,
+                          ),
                           const SizedBox(height: 8),
                           Text(
                             q.isEmpty ? 'No calls yet' : 'No matching calls',
@@ -225,24 +240,33 @@ class _CallsScreenState extends ConsumerState<CallsScreen> {
                           const SizedBox(height: 4),
                           Text(
                             q.isEmpty
-                                ? 'Calls you make will show up here'
+                                ? 'Lead calls and device call logs will appear here'
                                 : 'Try a different search',
                             style: AppText.caption11,
                           ),
                         ],
                       ),
                     ),
-                  if (today.isNotEmpty) ...[
-                    _SectionLabel(label: 'TODAY'),
-                    for (final e in today) _CallTile(entry: e),
+                  if (leadCalls.isNotEmpty) ...[
+                    _CallGroupHeader(
+                      icon: Icons.insights_outlined,
+                      title: 'Lead calls',
+                      subtitle: 'Calls linked to a lead',
+                      count: leadCalls.length,
+                    ),
+                    for (final entry in leadCalls) _LeadCallTile(entry: entry),
                   ],
-                  if (yesterday.isNotEmpty) ...[
-                    _SectionLabel(label: 'YESTERDAY'),
-                    for (final e in yesterday) _CallTile(entry: e),
-                  ],
-                  if (older.isNotEmpty) ...[
-                    _SectionLabel(label: 'EARLIER'),
-                    for (final e in older) _CallTile(entry: e),
+                  if (phoneLogCalls.isNotEmpty) ...[
+                    if (leadCalls.isNotEmpty)
+                      const SizedBox(height: AppSpacing.md),
+                    _CallGroupHeader(
+                      icon: Icons.history_rounded,
+                      title: 'Phone call log',
+                      subtitle: 'Calls captured from this device',
+                      count: phoneLogCalls.length,
+                    ),
+                    for (final entry in phoneLogCalls)
+                      _PhoneCallLogTile(entry: entry),
                   ],
                 ],
               ),
@@ -263,7 +287,10 @@ class _CallsScreenState extends ConsumerState<CallsScreen> {
       builder: (sheetContext) => SafeArea(
         child: Padding(
           padding: const EdgeInsets.fromLTRB(
-            AppSpacing.lg, AppSpacing.lg, AppSpacing.lg, AppSpacing.xl,
+            AppSpacing.lg,
+            AppSpacing.lg,
+            AppSpacing.lg,
+            AppSpacing.xl,
           ),
           child: Column(
             mainAxisSize: MainAxisSize.min,
@@ -280,7 +307,10 @@ class _CallsScreenState extends ConsumerState<CallsScreen> {
                   ),
                 ),
               ),
-              Text('Filter by direction', style: AppText.display20.copyWith(fontSize: 18)),
+              Text(
+                'Filter by direction',
+                style: AppText.display20.copyWith(fontSize: 18),
+              ),
               const SizedBox(height: AppSpacing.md),
               for (final d in _directions)
                 TapScale(
@@ -291,13 +321,18 @@ class _CallsScreenState extends ConsumerState<CallsScreen> {
                   child: Container(
                     margin: const EdgeInsets.only(bottom: AppSpacing.xs),
                     padding: const EdgeInsets.symmetric(
-                      horizontal: AppSpacing.md, vertical: AppSpacing.sm,
+                      horizontal: AppSpacing.md,
+                      vertical: AppSpacing.sm,
                     ),
                     decoration: BoxDecoration(
-                      color: d == _direction ? AppColors.ribbonSurface : AppColors.pampas,
+                      color: d == _direction
+                          ? AppColors.ribbonSurface
+                          : AppColors.pampas,
                       borderRadius: BorderRadius.circular(AppRadius.md),
                       border: Border.all(
-                        color: d == _direction ? AppColors.blueRibbon : AppColors.westar,
+                        color: d == _direction
+                            ? AppColors.blueRibbon
+                            : AppColors.westar,
                       ),
                     ),
                     child: Row(
@@ -307,12 +342,18 @@ class _CallsScreenState extends ConsumerState<CallsScreen> {
                             d,
                             style: AppText.body14.copyWith(
                               fontWeight: FontWeight.w600,
-                              color: d == _direction ? AppColors.blueRibbon : AppColors.zeus,
+                              color: d == _direction
+                                  ? AppColors.blueRibbon
+                                  : AppColors.zeus,
                             ),
                           ),
                         ),
                         if (d == _direction)
-                          const Icon(Icons.check, size: 18, color: AppColors.blueRibbon),
+                          const Icon(
+                            Icons.check,
+                            size: 18,
+                            color: AppColors.blueRibbon,
+                          ),
                       ],
                     ),
                   ),
@@ -402,7 +443,11 @@ class _CallLogPermissionCard extends StatelessWidget {
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Icon(Icons.call_outlined, size: 18, color: AppColors.governorBay),
+          const Icon(
+            Icons.call_outlined,
+            size: 18,
+            color: AppColors.governorBay,
+          ),
           const SizedBox(width: AppSpacing.sm),
           Expanded(
             child: Column(
@@ -418,13 +463,18 @@ class _CallLogPermissionCard extends StatelessWidget {
                 const SizedBox(height: 2),
                 Text(
                   "Grant call log access to log inbound, outbound and missed calls automatically.",
-                  style: AppText.caption11.copyWith(color: AppColors.governorBay),
+                  style: AppText.caption11.copyWith(
+                    color: AppColors.governorBay,
+                  ),
                 ),
                 const SizedBox(height: AppSpacing.sm),
                 TapScale(
                   onTap: onEnable,
                   child: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 14,
+                      vertical: 8,
+                    ),
                     decoration: BoxDecoration(
                       color: AppColors.blueRibbon,
                       borderRadius: BorderRadius.circular(AppRadius.sm),
@@ -447,15 +497,65 @@ class _CallLogPermissionCard extends StatelessWidget {
   }
 }
 
-class _SectionLabel extends StatelessWidget {
-  const _SectionLabel({required this.label});
-  final String label;
+class _CallGroupHeader extends StatelessWidget {
+  const _CallGroupHeader({
+    required this.icon,
+    required this.title,
+    required this.subtitle,
+    required this.count,
+  });
+
+  final IconData icon;
+  final String title;
+  final String subtitle;
+  final int count;
 
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.only(top: 4, bottom: 6),
-      child: Text(label, style: AppText.label11),
+      padding: const EdgeInsets.only(top: 4, bottom: 8),
+      child: Row(
+        children: [
+          Container(
+            width: 30,
+            height: 30,
+            decoration: BoxDecoration(
+              color: AppColors.ribbonSurface,
+              borderRadius: BorderRadius.circular(AppRadius.sm),
+            ),
+            child: Icon(icon, size: 16, color: AppColors.governorBay),
+          ),
+          const SizedBox(width: AppSpacing.xs),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(title, style: AppText.display16.copyWith(fontSize: 15)),
+                Text(
+                  subtitle,
+                  style: AppText.caption11.copyWith(color: AppColors.schooner),
+                ),
+              ],
+            ),
+          ),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+            decoration: BoxDecoration(
+              color: AppColors.pampas,
+              borderRadius: BorderRadius.circular(AppRadius.sm),
+              border: Border.all(color: AppColors.westar),
+            ),
+            child: Text(
+              '$count',
+              style: AppText.mono(
+                size: 11,
+                weight: FontWeight.w700,
+                color: AppColors.merlin,
+              ),
+            ),
+          ),
+        ],
+      ),
     );
   }
 }
@@ -497,88 +597,98 @@ class _CallTileSkeleton extends StatelessWidget {
   }
 }
 
-class _CallTile extends StatelessWidget {
-  const _CallTile({required this.entry});
+class _LeadCallTile extends StatelessWidget {
+  const _LeadCallTile({required this.entry});
 
   final CallLogEntry entry;
 
   @override
   Widget build(BuildContext context) {
-    final dur = _fmtDuration(entry.duration);
-    final time = _fmtWhen(entry.calledAt);
+    final duration = _formatCallDuration(entry.duration);
+    final when = _formatCallWhen(entry.calledAt);
 
     return GestureDetector(
-      onTap: entry.leadId != null
-          ? () => context.push('/leads/${entry.leadId}')
-          : null,
+      onTap: () => context.push('/leads/${entry.leadId}'),
       child: Container(
-      margin: const EdgeInsets.only(bottom: 8),
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 13),
-      decoration: BoxDecoration(
-        color: AppColors.white,
-        borderRadius: BorderRadius.circular(AppRadius.lg),
-        border: Border.all(color: AppColors.westar),
-        boxShadow: AppShadows.card,
-      ),
-      child: Row(
-        children: [
-          // Direction indicator
-          Container(
-            width: 36,
-            height: 36,
-            decoration: BoxDecoration(
-              color: entry.isInbound ? AppColors.violetSurface : AppColors.foam,
-              borderRadius: BorderRadius.circular(AppRadius.sm),
+        margin: const EdgeInsets.only(bottom: 8),
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 13),
+        decoration: BoxDecoration(
+          color: AppColors.white,
+          borderRadius: BorderRadius.circular(AppRadius.lg),
+          border: Border.all(color: AppColors.ribbonBorder),
+          boxShadow: AppShadows.card,
+        ),
+        child: Row(
+          children: [
+            Container(
+              width: 38,
+              height: 38,
+              decoration: BoxDecoration(
+                color: entry.isInbound
+                    ? AppColors.violetSurface
+                    : AppColors.ribbonSurface,
+                borderRadius: BorderRadius.circular(AppRadius.sm),
+              ),
+              child: Icon(
+                entry.isInbound
+                    ? Icons.call_received_outlined
+                    : Icons.call_made_outlined,
+                size: 17,
+                color: entry.isInbound
+                    ? AppColors.electricViolet
+                    : AppColors.blueRibbon,
+              ),
             ),
-            child: Icon(
-              entry.isInbound ? Icons.call_received_outlined : Icons.call_made_outlined,
-              size: 16,
-              color: entry.isInbound ? AppColors.electricViolet : AppColors.greenHaze,
-            ),
-          ),
-          const SizedBox(width: AppSpacing.sm),
-
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  children: [
-                    Expanded(
-                      child: Text(
-                        entry.leadName,
-                        style: AppText.body14.copyWith(fontWeight: FontWeight.w700),
+            const SizedBox(width: AppSpacing.sm),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          entry.leadName,
+                          style: AppText.body14.copyWith(
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
                       ),
-                    ),
-                    Text(time, style: AppText.caption11),
-                  ],
-                ),
-                const SizedBox(height: 2),
-                Row(
-                  children: [
-                    Text(entry.phone, style: AppText.mono(size: 11)),
-                    const Spacer(),
-                    Text(dur, style: AppText.mono(size: 11, color: AppColors.schooner)),
-                  ],
-                ),
-                // Source/intent pills only mean something once this call is
-                // tied to a known lead — a bare device call-log entry (e.g. a
-                // personal call, or a number not in the CRM yet) has neither,
-                // and showing an empty or placeholder pill for it would read
-                // as a fabricated lead-source claim.
-                if (entry.leadId != null &&
-                    (entry.source.displayName.isNotEmpty || entry.intent.isNotEmpty)) ...[
-                  const SizedBox(height: 5),
+                      Text(when, style: AppText.caption11),
+                    ],
+                  ),
+                  const SizedBox(height: 2),
+                  Row(
+                    children: [
+                      Text(entry.phone, style: AppText.mono(size: 11)),
+                      const Spacer(),
+                      Text(
+                        duration,
+                        style: AppText.mono(
+                          size: 11,
+                          color: AppColors.schooner,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 6),
                   Wrap(
                     spacing: 4,
                     runSpacing: 4,
                     children: [
                       LpMiniPill(
-                        label: entry.source.displayName,
+                        label: 'LEAD CALL',
                         foreground: AppColors.governorBay,
                         background: AppColors.zircon,
                         border: AppColors.periwinkle,
                       ),
+                      if (entry.source.displayName.isNotEmpty)
+                        LpMiniPill(
+                          label: entry.source.displayName,
+                          foreground: AppColors.governorBay,
+                          background: AppColors.zircon,
+                          border: AppColors.periwinkle,
+                        ),
                       if (entry.intent.isNotEmpty)
                         LpMiniPill(
                           label: entry.intent,
@@ -589,42 +699,115 @@ class _CallTile extends StatelessWidget {
                     ],
                   ),
                 ],
+              ),
+            ),
+            const SizedBox(width: AppSpacing.xs),
+            if (entry.callId != null)
+              ScoreRing(score: entry.score, size: 38)
+            else
+              const Icon(
+                Icons.chevron_right,
+                size: 20,
+                color: AppColors.schooner,
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _PhoneCallLogTile extends StatelessWidget {
+  const _PhoneCallLogTile({required this.entry});
+
+  final CallLogEntry entry;
+
+  @override
+  Widget build(BuildContext context) {
+    final isNumberOnly = entry.leadName == entry.phone;
+    final direction = entry.isInbound ? 'Incoming' : 'Outgoing';
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 7),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+      decoration: BoxDecoration(
+        color: AppColors.white,
+        borderRadius: BorderRadius.circular(AppRadius.md),
+        border: Border.all(color: AppColors.westar),
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 36,
+            height: 36,
+            decoration: BoxDecoration(
+              color: AppColors.pampas,
+              borderRadius: BorderRadius.circular(AppRadius.sm),
+            ),
+            child: Icon(
+              entry.isInbound
+                  ? Icons.call_received_outlined
+                  : Icons.call_made_outlined,
+              size: 16,
+              color: entry.isInbound
+                  ? AppColors.electricViolet
+                  : AppColors.greenHaze,
+            ),
+          ),
+          const SizedBox(width: AppSpacing.sm),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  entry.leadName,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: AppText.body14.copyWith(fontWeight: FontWeight.w600),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  isNumberOnly ? direction : '${entry.phone} · $direction',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: AppText.mono(size: 11, color: AppColors.schooner),
+                ),
               ],
             ),
           ),
-
-          // A score ring only makes sense for a call that was actually
-          // recorded and AI-analyzed (has a backend call_id) — a plain
-          // device call-log entry has no score, and ScoreRing's own
-          // score<=0 fallback reads as "New", which is misleading here.
-          if (entry.callId != null) ...[
-            const SizedBox(width: AppSpacing.xs),
-            ScoreRing(score: entry.score, size: 38),
-          ],
+          const SizedBox(width: AppSpacing.sm),
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              Text(_formatCallWhen(entry.calledAt), style: AppText.caption11),
+              const SizedBox(height: 3),
+              Text(
+                _formatCallDuration(entry.duration),
+                style: AppText.mono(size: 11, color: AppColors.schooner),
+              ),
+            ],
+          ),
         ],
       ),
-    ),
     );
   }
+}
 
-  String _fmtDuration(Duration d) {
-    final m = d.inMinutes.toString().padLeft(2, '0');
-    final s = d.inSeconds.remainder(60).toString().padLeft(2, '0');
-    return '$m:$s';
-  }
+String _formatCallDuration(Duration duration) {
+  final minutes = duration.inMinutes.toString().padLeft(2, '0');
+  final seconds = duration.inSeconds.remainder(60).toString().padLeft(2, '0');
+  return '$minutes:$seconds';
+}
 
-  /// The tile's trailing timestamp. A bare time is only unambiguous for
-  /// today's calls — for anything older, show the date too (with the year
-  /// once it's a previous year) so "3:40 PM" on a two-week-old call isn't
-  /// mistaken for today.
-  String _fmtWhen(DateTime at) {
-    final now = DateTime.now();
-    final callDay = DateTime(at.year, at.month, at.day);
-    final today = DateTime(now.year, now.month, now.day);
-    final diffDays = today.difference(callDay).inDays;
-    if (diffDays == 0) return DateFormat('h:mm a').format(at);
-    if (diffDays == 1) return 'Yesterday, ${DateFormat('h:mm a').format(at)}';
-    if (at.year == now.year) return DateFormat('d MMM, h:mm a').format(at);
-    return DateFormat('d MMM yyyy, h:mm a').format(at);
-  }
+/// A bare time is only unambiguous for today's calls. Older entries include
+/// their date because the lead and device lists are intentionally separated.
+String _formatCallWhen(DateTime at) {
+  final now = DateTime.now();
+  final callDay = DateTime(at.year, at.month, at.day);
+  final today = DateTime(now.year, now.month, now.day);
+  final difference = today.difference(callDay).inDays;
+  if (difference == 0) return DateFormat('h:mm a').format(at);
+  if (difference == 1) return 'Yesterday, ${DateFormat('h:mm a').format(at)}';
+  if (at.year == now.year) return DateFormat('d MMM, h:mm a').format(at);
+  return DateFormat('d MMM yyyy, h:mm a').format(at);
 }

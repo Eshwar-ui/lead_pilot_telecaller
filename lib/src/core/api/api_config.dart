@@ -55,7 +55,7 @@ class ApiConfig {
   static const bool useMockData = false;
 
   /// The active backend target.
-  static const ApiEnvironment environment = ApiEnvironment.prod;
+  static const ApiEnvironment environment = ApiEnvironment.dev;
 
   static String get baseUrl => environment.baseUrl;
 

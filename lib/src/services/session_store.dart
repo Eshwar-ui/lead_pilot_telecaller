@@ -19,6 +19,7 @@ class Session {
     this.role,
     this.orgName,
     this.mustResetPassword = false,
+    this.restoring = false,
   });
 
   final String? token;
@@ -29,9 +30,14 @@ class Session {
   final String? orgName;
   final bool mustResetPassword;
 
+  /// True only while secure storage is being checked on a cold app start.
+  /// Prevents the router from briefly rendering Login for an existing session.
+  final bool restoring;
+
   bool get isLoggedIn => token != null;
 
   static const empty = Session();
+  static const restoringSession = Session(restoring: true);
 }
 
 /// Persists the session in the platform keychain/keystore (not
@@ -44,23 +50,33 @@ class SessionController extends Notifier<Session> {
 
   @override
   Session build() {
-    // Fire-and-forget: state starts empty (logged-out) and updates once the
-    // stored session (if any) has been read back from secure storage.
+    // Fire-and-forget: expose an explicit restoring state so the app can show
+    // branding instead of flashing the logged-out route.
     unawaited(_restore());
-    return Session.empty;
+    return Session.restoringSession;
   }
 
   Future<void> _restore() async {
-    final token = await _storage.read(key: _tokenKey);
-    final userJson = await _storage.read(key: _userKey);
-    if (token == null || userJson == null) return;
-    final user = jsonDecode(userJson) as Map<String, dynamic>;
-    state = _sessionFrom(token, user);
-    // Also covers a cold app start with an already-logged-in session (not
-    // just a fresh login below) — the backend's stored FCM token could be
-    // stale from a reinstall, or never set if this device registered before
-    // push notifications existed.
-    unawaited(PushNotificationService.instance.registerTokenIfNeeded(token));
+    try {
+      final token = await _storage.read(key: _tokenKey);
+      final userJson = await _storage.read(key: _userKey);
+      if (!ref.mounted) return;
+      if (token == null || userJson == null) {
+        state = Session.empty;
+        return;
+      }
+      final user = jsonDecode(userJson) as Map<String, dynamic>;
+      state = _sessionFrom(token, user);
+      // Also covers a cold app start with an already-logged-in session (not
+      // just a fresh login below) — the backend's stored FCM token could be
+      // stale from a reinstall, or never set if this device registered before
+      // push notifications existed.
+      unawaited(PushNotificationService.instance.registerTokenIfNeeded(token));
+    } catch (_) {
+      // A corrupt/invalidated Android keystore value must not leave the splash
+      // spinning forever. Fall back to a clean login state.
+      if (ref.mounted) state = Session.empty;
+    }
   }
 
   /// Called after a successful `POST /api/auth/login` with the raw response.

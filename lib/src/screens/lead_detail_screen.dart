@@ -57,6 +57,10 @@ class _LeadDetailScreenState extends ConsumerState<LeadDetailScreen> {
 
     return LpScreen(
       title: 'Lead Detail',
+      // Normal in-app navigation can pop back to Home. A restored/deep-linked
+      // detail route may have no history, so keep the back button functional by
+      // explicitly returning to the lead list in that case.
+      onBack: () => context.canPop() ? context.pop() : context.go('/home'),
       trailing: Row(
         mainAxisSize: MainAxisSize.min,
         children: [

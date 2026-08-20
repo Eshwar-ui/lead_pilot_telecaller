@@ -6,6 +6,13 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:lead_pilot_telecaller/src/services/session_store.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+Future<void> _waitForSessionRestore(ProviderContainer container) async {
+  for (var attempt = 0; attempt < 20; attempt++) {
+    if (!container.read(sessionProvider).restoring) return;
+    await pumpEventQueue();
+  }
+}
+
 // SessionController holds the JWT/session identity and had zero direct test
 // coverage before this — everything else (the router redirect, the 401
 // force-logout hook, every screen watching sessionProvider) depends on its
@@ -67,12 +74,14 @@ void main() {
       final container = ProviderContainer();
       addTearDown(container.dispose);
 
-      // build() starts empty; _restore() runs as a fire-and-forget microtask.
+      // build() starts in an explicit restore state so Login does not flash.
       expect(container.read(sessionProvider).isLoggedIn, isFalse);
-      await pumpEventQueue();
+      expect(container.read(sessionProvider).restoring, isTrue);
+      await _waitForSessionRestore(container);
 
       final session = container.read(sessionProvider);
       expect(session.isLoggedIn, isTrue);
+      expect(session.restoring, isFalse);
       expect(session.token, 'tok-123');
       expect(session.name, 'Priya');
     },
@@ -82,14 +91,15 @@ void main() {
     final container = ProviderContainer();
     addTearDown(container.dispose);
 
-    await pumpEventQueue();
+    await _waitForSessionRestore(container);
     expect(container.read(sessionProvider).isLoggedIn, isFalse);
+    expect(container.read(sessionProvider).restoring, isFalse);
   });
 
   test('logout clears secure storage and resets state to empty', () async {
     final container = ProviderContainer();
     addTearDown(container.dispose);
-    await pumpEventQueue();
+    await _waitForSessionRestore(container);
 
     await container
         .read(sessionProvider.notifier)
@@ -106,7 +116,7 @@ void main() {
   test('clearMustResetPassword flips the flag and persists it', () async {
     final container = ProviderContainer();
     addTearDown(container.dispose);
-    await pumpEventQueue();
+    await _waitForSessionRestore(container);
 
     await container
         .read(sessionProvider.notifier)
@@ -132,7 +142,7 @@ void main() {
     () async {
       final container = ProviderContainer();
       addTearDown(container.dispose);
-      await pumpEventQueue();
+      await _waitForSessionRestore(container);
 
       await container
           .read(sessionProvider.notifier)

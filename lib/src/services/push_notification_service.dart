@@ -52,8 +52,10 @@ class PushNotificationService {
         final notification = message.notification;
         if (notification == null) return;
         NotificationService.instance.showNow(
-          notifId: message.messageId?.hashCode.abs() ?? DateTime.now().millisecondsSinceEpoch.hashCode.abs(),
-          title: notification.title ?? 'LeadPilot',
+          notifId:
+              message.messageId?.hashCode.abs() ??
+              DateTime.now().millisecondsSinceEpoch.hashCode.abs(),
+          title: notification.title ?? 'Asan Telecaller',
           body: notification.body ?? '',
         );
       });

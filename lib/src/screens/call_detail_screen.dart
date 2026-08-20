@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 import 'package:flutter_app_utilities/flutter_app_utilities.dart'
     hide AppRadius, AppSpacing;
@@ -140,6 +141,16 @@ class _CallDetailScreenState extends ConsumerState<CallDetailScreen> {
   bool _translating = false;
   final _searchController = TextEditingController();
   String _query = '';
+
+  void _goBack() {
+    if (context.canPop()) {
+      context.pop();
+    } else {
+      // Overlay/deep-link navigation can make Call Detail the root route.
+      // Keep the visible back control useful in that case.
+      context.go('/leads/${widget.leadId}');
+    }
+  }
 
   // Summary tab's own "View English" toggle — independent of the transcript
   // one above, since a telecaller may only care about one or the other.
@@ -352,6 +363,7 @@ class _CallDetailScreenState extends ConsumerState<CallDetailScreen> {
               return Column(
                 children: [
                   _Header(
+                    onBack: _goBack,
                     leadName: widget.args?.leadName ?? '',
                     calledAt: widget.args?.calledAt,
                     duration: null,
@@ -369,6 +381,7 @@ class _CallDetailScreenState extends ConsumerState<CallDetailScreen> {
               return Column(
                 children: [
                   _Header(
+                    onBack: _goBack,
                     leadName: widget.args?.leadName ?? '',
                     calledAt: widget.args?.calledAt,
                     duration: null,
@@ -379,7 +392,13 @@ class _CallDetailScreenState extends ConsumerState<CallDetailScreen> {
                   Expanded(
                     child: LpErrorState(
                       message: snapshot.error.toString(),
-                      onRetry: () => setState(() => _future = _load()),
+                      onRetry: () {
+                        // An assignment expression returns the assigned Future;
+                        // use a block so setState's callback remains synchronous.
+                        setState(() {
+                          _future = _load();
+                        });
+                      },
                     ),
                   ),
                 ],
@@ -410,6 +429,7 @@ class _CallDetailScreenState extends ConsumerState<CallDetailScreen> {
             return Column(
               children: [
                 _Header(
+                  onBack: _goBack,
                   leadName: widget.args?.leadName ?? '',
                   calledAt: widget.args?.calledAt,
                   duration: duration,
@@ -522,6 +542,7 @@ class _CallDetailData {
 
 class _Header extends StatelessWidget {
   const _Header({
+    required this.onBack,
     required this.leadName,
     required this.calledAt,
     required this.duration,
@@ -530,6 +551,7 @@ class _Header extends StatelessWidget {
     required this.onTabChanged,
   });
 
+  final VoidCallback onBack;
   final String leadName;
   final DateTime? calledAt;
   final Duration? duration;
@@ -570,10 +592,7 @@ class _Header extends StatelessWidget {
             ),
             child: Row(
               children: [
-                LpIconButton(
-                  icon: Icons.arrow_back,
-                  onTap: () => Navigator.of(context).maybePop(),
-                ),
+                LpIconButton(icon: Icons.arrow_back, onTap: onBack),
                 Expanded(
                   child: Column(
                     children: [
@@ -693,10 +712,11 @@ class _SummaryTab extends ConsumerWidget {
     final langName = language != null
         ? (_langNames[language] ?? language!)
         : null;
-    final isNonEnglish =
-        language != null &&
-        language != 'en' &&
-        (keyPoints.isNotEmpty || nextSteps.isNotEmpty);
+    // Some completed calls have no language tag even when the transcript is
+    // Telugu or another non-English language. Treat an unknown tag as
+    // translatable instead of hiding the English action.
+    final canTranslate =
+        language != 'en' && (keyPoints.isNotEmpty || nextSteps.isNotEmpty);
 
     final followUps = ref.watch(followUpsProvider);
     final followUpMatches = followUps.where((f) => f.leadId == leadId);
@@ -705,9 +725,9 @@ class _SummaryTab extends ConsumerWidget {
     return ListView(
       padding: const EdgeInsets.all(AppSpacing.md),
       children: [
-        if (isNonEnglish) ...[
+        if (canTranslate) ...[
           _EnglishToggleBanner(
-            langName: langName!,
+            langName: langName ?? 'the original language',
             sourceLabel: 'Summary',
             showEnglish: showEnglish,
             translating: translating,
@@ -1156,15 +1176,14 @@ class _ScoreTab extends StatelessWidget {
     final langName = language != null
         ? (_langNames[language] ?? language!)
         : null;
-    final isNonEnglish =
-        language != null && language != 'en' && hasTranslatableText;
+    final canTranslate = language != 'en' && hasTranslatableText;
 
     return ListView(
       padding: const EdgeInsets.all(AppSpacing.md),
       children: [
-        if (isNonEnglish) ...[
+        if (canTranslate) ...[
           _EnglishToggleBanner(
-            langName: langName!,
+            langName: langName ?? 'the original language',
             sourceLabel: 'Score notes',
             showEnglish: showEnglish,
             translating: translating,
@@ -1602,7 +1621,7 @@ class _TranscriptTab extends StatelessWidget {
     final langName = language != null
         ? (_langNames[language] ?? language!)
         : null;
-    final isNonEnglish = language != null && language != 'en';
+    final canTranslate = language != 'en' && turns.isNotEmpty;
 
     final filtered = query.isEmpty
         ? turns
@@ -1633,11 +1652,11 @@ class _TranscriptTab extends StatelessWidget {
             ],
           ),
         ),
-        if (isNonEnglish)
+        if (canTranslate)
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md),
             child: _EnglishToggleBanner(
-              langName: langName!,
+              langName: langName ?? 'the original language',
               sourceLabel: 'Transcript',
               showEnglish: showEnglish,
               translating: translating,

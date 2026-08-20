@@ -588,7 +588,7 @@ class CallNotesOverlayService : Service() {
             mainHandler.post {
                 Toast.makeText(
                     this,
-                    "Couldn't show the call notes overlay — check \"Display over other apps\" permission for LeadPilot.",
+                    "Couldn't show the call notes overlay — check \"Display over other apps\" permission for Asan Telecaller.",
                     Toast.LENGTH_LONG,
                 ).show()
             }

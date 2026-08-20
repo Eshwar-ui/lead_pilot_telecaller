@@ -7,6 +7,7 @@ import 'package:flutter_app_utilities/flutter_app_utilities.dart'
     hide AppSpacing, AppRadius;
 
 import '../models/lead.dart';
+import '../screens/add_outbound_lead_screen.dart';
 import '../services/call_actions.dart';
 import '../state/providers.dart';
 import '../theme/app_colors.dart';
@@ -138,7 +139,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
         ),
         // Add lead.
         TapScale(
-          onTap: () => context.push('/outbound/add'),
+          onTap: () => AddOutboundLeadScreen.show(context),
           child: Container(
             width: 48,
             height: 48,

@@ -21,6 +21,22 @@ enum _UploadPhase { idle, uploading, processing, done, error }
 class AddOutboundLeadScreen extends ConsumerStatefulWidget {
   const AddOutboundLeadScreen({super.key});
 
+  /// Show as a modal bottom sheet instead of a full-screen route.
+  static Future<void> show(BuildContext context) {
+    final container = ProviderScope.containerOf(context);
+    return showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      barrierColor: Colors.black.withValues(alpha: 0.55),
+      useSafeArea: true,
+      builder: (ctx) => UncontrolledProviderScope(
+        container: container,
+        child: const AddOutboundLeadScreen(),
+      ),
+    );
+  }
+
   @override
   ConsumerState<AddOutboundLeadScreen> createState() =>
       _AddOutboundLeadScreenState();
@@ -260,7 +276,7 @@ class _AddOutboundLeadScreenState extends ConsumerState<AddOutboundLeadScreen> {
         // up (PostCallScreen), instead of leaving the telecaller to find
         // this call in the lead's history and tap into it themselves.
         final name = ref.read(outboundLeadDraftProvider).name.trim();
-        context.go(
+        _closeAndPush(
           '/leads/$key/calls/$_callId',
           extra: CallDetailArgs(
             leadName: name,
@@ -269,14 +285,29 @@ class _AddOutboundLeadScreenState extends ConsumerState<AddOutboundLeadScreen> {
           ),
         );
       } else {
-        context.pop();
+        Navigator.of(context).pop();
       }
     }
   }
 
   Future<void> _saveAndCall() async {
     final key = await _createLead();
-    if (key != null && mounted) context.go('/leads/$key');
+    if (key != null && mounted) {
+      _closeAndPush('/leads/$key');
+    }
+  }
+
+  /// Close the add-lead sheet, then push the destination above the existing
+  /// home route. Using `go()` here replaced `/home`, leaving Lead Detail with
+  /// no route to pop and making both the UI and Android back buttons appear
+  /// broken. Capture the router before closing because this sheet's context is
+  /// disposed as soon as it pops.
+  void _closeAndPush(String location, {Object? extra}) {
+    final router = GoRouter.of(context);
+    Navigator.of(context).pop();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      router.push(location, extra: extra);
+    });
   }
 
   void _toast(String msg) {
@@ -293,248 +324,246 @@ class _AddOutboundLeadScreenState extends ConsumerState<AddOutboundLeadScreen> {
     final busy =
         _phase == _UploadPhase.uploading || _phase == _UploadPhase.processing;
 
-    return Scaffold(
-      backgroundColor: Colors.black.withValues(alpha: 0.72),
-      body: SafeArea(
-        top: false,
-        child: Align(
-          alignment: Alignment.bottomCenter,
-          child: Container(
-            constraints: const BoxConstraints(maxWidth: 480, maxHeight: 820),
-            decoration: const BoxDecoration(
-              color: AppColors.white,
-              borderRadius: BorderRadius.vertical(top: Radius.circular(18)),
-              boxShadow: [
-                BoxShadow(
-                  color: Color(0x38111827),
-                  blurRadius: 18,
-                  offset: Offset(0, -8),
+    // Bottom-sheet container — showModalBottomSheet handles the barrier/backdrop.
+    return Container(
+      constraints: BoxConstraints(
+        maxHeight: MediaQuery.of(context).size.height * 0.92,
+        maxWidth: 480,
+      ),
+      decoration: const BoxDecoration(
+        color: AppColors.white,
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+        boxShadow: [
+          BoxShadow(
+            color: Color(0x38111827),
+            blurRadius: 18,
+            offset: Offset(0, -8),
+          ),
+        ],
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const SizedBox(height: 10),
+          Container(
+            width: 38,
+            height: 4,
+            decoration: BoxDecoration(
+              color: AppColors.westar,
+              borderRadius: BorderRadius.circular(2),
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(20, 12, 20, 14),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('Add Outbound Lead', style: AppText.display20),
+                Text(
+                  'Manually add a lead to your outbound list',
+                  style: AppText.body14.copyWith(color: AppColors.schooner),
                 ),
               ],
             ),
-            child: Column(
+          ),
+          const Divider(height: 1),
+          Flexible(
+            child: ListView(
+              shrinkWrap: true,
+              padding: EdgeInsets.fromLTRB(
+                20,
+                17,
+                20,
+                20 + MediaQuery.viewInsetsOf(context).bottom,
+              ),
               children: [
-                const AppGap.xs(),
-                Container(
-                  width: 38,
-                  height: 4,
-                  decoration: BoxDecoration(
-                    color: AppColors.westar,
-                    borderRadius: BorderRadius.circular(2),
+                FormShell(
+                  label: 'Name',
+                  required: true,
+                  child: LpTextField(
+                    value: draft.name,
+                    onChanged: controller.updateName,
+                    enabled: !_identityLocked,
                   ),
                 ),
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(20, 12, 20, 14),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text('Add Outbound Lead', style: AppText.display20),
-                      Text(
-                        'Manually add a lead to your outbound list',
-                        style: AppText.body14.copyWith(
-                          color: AppColors.schooner,
-                        ),
-                      ),
-                    ],
+                const AppGap.md(),
+                FormShell(
+                  label: 'Phone Number',
+                  required: true,
+                  optionalText: _identityLocked
+                      ? '(locked — matches the uploaded call)'
+                      : null,
+                  child: LpPhoneField(
+                    controller: _phoneController,
+                    enabled: !_identityLocked,
                   ),
                 ),
-                const Divider(height: 1),
-                Expanded(
-                  child: ListView(
-                    padding: const EdgeInsets.fromLTRB(20, 17, 20, 24),
-                    children: [
-                      FormShell(
-                        label: 'Name',
-                        required: true,
-                        child: LpTextField(
-                          value: draft.name,
-                          onChanged: controller.updateName,
-                          enabled: !_identityLocked,
-                        ),
+                if (draft.hasDuplicate) ...[
+                  const AppGap.xs(),
+                  GestureDetector(
+                    behavior: HitTestBehavior.opaque,
+                    onTap: draft.dedupeContactKey == null
+                        ? null
+                        : () =>
+                              _closeAndPush('/leads/${draft.dedupeContactKey}'),
+                    child: Container(
+                      padding: const EdgeInsets.all(14),
+                      decoration: BoxDecoration(
+                        color: AppColors.warningSurface,
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(color: AppColors.warningBorder),
                       ),
-                      const AppGap.md(),
-                      FormShell(
-                        label: 'Phone Number',
-                        required: true,
-                        optionalText: _identityLocked
-                            ? '(locked — matches the uploaded call)'
-                            : null,
-                        child: LpPhoneField(
-                          controller: _phoneController,
-                          enabled: !_identityLocked,
-                        ),
-                      ),
-                      if (draft.hasDuplicate) ...[
-                        const AppGap.xs(),
-                        GestureDetector(
-                          behavior: HitTestBehavior.opaque,
-                          onTap: draft.dedupeContactKey == null
-                              ? null
-                              : () => context.go(
-                                  '/leads/${draft.dedupeContactKey}',
+                      child: Row(
+                        children: [
+                          const Icon(
+                            Icons.warning_amber,
+                            color: AppColors.tahitiGold,
+                          ),
+                          const AppGap.sm(axis: Axis.horizontal),
+                          Expanded(
+                            child: RichText(
+                              text: TextSpan(
+                                style: AppText.body14.copyWith(
+                                  color: AppColors.warningText,
                                 ),
-                          child: Container(
-                            padding: const EdgeInsets.all(14),
-                            decoration: BoxDecoration(
-                              color: AppColors.warningSurface,
-                              borderRadius: BorderRadius.circular(8),
-                              border: Border.all(
-                                color: AppColors.warningBorder,
-                              ),
-                            ),
-                            child: Row(
-                              children: [
-                                const Icon(
-                                  Icons.warning_amber,
-                                  color: AppColors.tahitiGold,
-                                ),
-                                const AppGap.sm(axis: Axis.horizontal),
-                                Expanded(
-                                  child: RichText(
-                                    text: TextSpan(
-                                      style: AppText.body14.copyWith(
-                                        color: AppColors.warningText,
-                                      ),
-                                      text:
-                                          'This number is already in your leads. ',
-                                      children: [
-                                        TextSpan(
-                                          text: 'View existing lead ->',
-                                          style: AppText.body14.copyWith(
-                                            color: AppColors.blueRibbon,
-                                            fontWeight: FontWeight.w700,
-                                          ),
-                                        ),
-                                      ],
+                                text: 'This number is already in your leads. ',
+                                children: [
+                                  TextSpan(
+                                    text: 'View existing lead ->',
+                                    style: AppText.body14.copyWith(
+                                      color: AppColors.blueRibbon,
+                                      fontWeight: FontWeight.w700,
                                     ),
                                   ),
-                                ),
-                              ],
+                                ],
+                              ),
                             ),
                           ),
-                        ),
-                      ],
-                      const AppGap.md(),
-                      FormShell(
-                        label: 'Reason',
-                        required: true,
-                        child: LpTextField(
-                          value: draft.reason,
-                          onChanged: controller.updateReason,
-                          maxLines: 3,
-                        ),
+                        ],
                       ),
-                      const AppGap.md(),
-                      FormShell(
-                        label: 'Source',
-                        required: true,
-                        child: _SourceDropdown(
-                          value: draft.source,
-                          onChanged: controller.updateSource,
-                        ),
-                      ),
-                      const AppGap.md(),
-                      FormShell(
-                        label: 'Call Recording',
-                        optionalText: '(optional)',
-                        child: _RecordingDropzone(
-                          phase: _phase,
-                          fileName: _fileName,
-                          stageLabel: _stageLabel,
-                          onTap: busy ? null : _pickAndUpload,
-                        ),
-                      ),
-                      const AppGap.md(),
-                      FormShell(
-                        label: 'Recording Date',
-                        optionalText: '(when was this call?)',
-                        child: GestureDetector(
-                          onTap: busy ? null : _pickDate,
-                          child: Container(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 15,
-                              vertical: 13,
-                            ),
-                            decoration: BoxDecoration(
-                              color: AppColors.pampas,
-                              borderRadius: BorderRadius.circular(8),
-                              border: Border.all(color: AppColors.westar),
-                            ),
-                            child: Row(
-                              children: [
-                                const Icon(
-                                  Icons.calendar_today_outlined,
-                                  size: 16,
-                                  color: AppColors.schooner,
-                                ),
-                                const AppGap.sm(axis: Axis.horizontal),
-                                Text(
-                                  _fmtDate(_callDate),
-                                  style: AppText.body14,
-                                ),
-                                const Spacer(),
-                                const Icon(
-                                  Icons.keyboard_arrow_down,
-                                  size: 16,
-                                  color: AppColors.schooner,
-                                ),
-                              ],
-                            ),
-                          ),
-                        ),
-                      ),
-                      if (_phase == _UploadPhase.done) ...[
-                        const AppGap.md(),
-                        _TranscriptResult(
-                          turns: _turns,
-                          verdict: _verdict,
-                          keyPoints: _keyPoints,
-                        ),
-                      ],
-                      if (_phase == _UploadPhase.error) ...[
-                        const AppGap.sm(),
-                        _ErrorPanel(
-                          message: _error ?? 'Upload failed',
-                          onRetry: _pickAndUpload,
-                        ),
-                      ],
-                    ],
+                    ),
+                  ),
+                ],
+                const AppGap.md(),
+                FormShell(
+                  label: 'Reason',
+                  required: true,
+                  child: LpTextField(
+                    value: draft.reason,
+                    onChanged: controller.updateReason,
+                    maxLines: 3,
                   ),
                 ),
-                const Divider(height: 1),
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(20, 14, 20, 20),
-                  child: Row(
-                    children: [
-                      SecondaryButton(
-                        label: 'Cancel',
-                        onTap: _saving ? null : () => context.pop(),
+                const AppGap.md(),
+                FormShell(
+                  label: 'Source',
+                  required: true,
+                  child: _SourceDropdown(
+                    value: draft.source,
+                    onChanged: controller.updateSource,
+                  ),
+                ),
+                const AppGap.md(),
+                FormShell(
+                  label: 'Call Recording',
+                  optionalText: '(optional)',
+                  child: _RecordingDropzone(
+                    phase: _phase,
+                    fileName: _fileName,
+                    stageLabel: _stageLabel,
+                    onTap: busy ? null : _pickAndUpload,
+                  ),
+                ),
+                const AppGap.md(),
+                FormShell(
+                  label: 'Recording Date',
+                  optionalText: '(when was this call?)',
+                  child: GestureDetector(
+                    onTap: busy ? null : _pickDate,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 15,
+                        vertical: 13,
                       ),
-                      const AppGap.sm(axis: Axis.horizontal),
-                      Expanded(
-                        child: SecondaryButton(
-                          label: 'Save Lead',
-                          onTap: _saveLead,
-                          loading: _saving,
-                        ),
+                      decoration: BoxDecoration(
+                        color: AppColors.pampas,
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(color: AppColors.westar),
                       ),
-                      const AppGap.sm(axis: Axis.horizontal),
-                      Expanded(
-                        child: PrimaryButton(
-                          label: 'Save & Call',
-                          icon: Icons.phone_outlined,
-                          color: AppColors.greenHaze,
-                          onTap: _saveAndCall,
-                          loading: _saving,
-                        ),
+                      child: Row(
+                        children: [
+                          const Icon(
+                            Icons.calendar_today_outlined,
+                            size: 16,
+                            color: AppColors.schooner,
+                          ),
+                          const AppGap.sm(axis: Axis.horizontal),
+                          Text(_fmtDate(_callDate), style: AppText.body14),
+                          const Spacer(),
+                          const Icon(
+                            Icons.keyboard_arrow_down,
+                            size: 16,
+                            color: AppColors.schooner,
+                          ),
+                        ],
                       ),
-                    ],
+                    ),
+                  ),
+                ),
+                if (_phase == _UploadPhase.done) ...[
+                  const AppGap.md(),
+                  _TranscriptResult(
+                    turns: _turns,
+                    verdict: _verdict,
+                    keyPoints: _keyPoints,
+                  ),
+                ],
+                if (_phase == _UploadPhase.error) ...[
+                  const AppGap.sm(),
+                  _ErrorPanel(
+                    message: _error ?? 'Upload failed',
+                    onRetry: _pickAndUpload,
+                  ),
+                ],
+              ],
+            ),
+          ),
+          const Divider(height: 1),
+          Padding(
+            padding: EdgeInsets.fromLTRB(
+              20,
+              14,
+              20,
+              14 + MediaQuery.viewPaddingOf(context).bottom,
+            ),
+            child: Row(
+              children: [
+                SecondaryButton(
+                  label: 'Cancel',
+                  onTap: _saving ? null : () => Navigator.of(context).pop(),
+                ),
+                const AppGap.sm(axis: Axis.horizontal),
+                Expanded(
+                  child: SecondaryButton(
+                    label: 'Save Lead',
+                    onTap: _saveLead,
+                    loading: _saving,
+                  ),
+                ),
+                const AppGap.sm(axis: Axis.horizontal),
+                Expanded(
+                  child: PrimaryButton(
+                    label: 'Save & Call',
+                    icon: Icons.phone_outlined,
+                    color: AppColors.greenHaze,
+                    onTap: _saveAndCall,
+                    loading: _saving,
                   ),
                 ),
               ],
             ),
           ),
-        ),
+        ],
       ),
     );
   }

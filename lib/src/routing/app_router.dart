@@ -79,6 +79,10 @@ final appRouterProvider = Provider<GoRouter>((ref) {
           isNewCall:
               (state.extra as bool?) ??
               (state.uri.queryParameters['new'] == '1'),
+          // Query-param navigation is the native overlay returning after the
+          // call. In-app `extra: true` navigation happens while the dialler is
+          // only starting, when scanning could select the previous recording.
+          captureOnOpen: state.uri.queryParameters['new'] == '1',
         ),
       ),
       GoRoute(

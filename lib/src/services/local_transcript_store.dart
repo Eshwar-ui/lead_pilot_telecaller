@@ -31,6 +31,7 @@ class LocalTranscriptStore {
 
   Map<String, dynamic> _toJson(CallTranscription t) => {
     'transcript': t.transcript,
+    if (t.callId != null) 'callId': t.callId,
     if (t.transcriptEn != null) 'transcriptEn': t.transcriptEn,
     if (t.language != null) 'languageCode': t.language,
     'entries': [
@@ -50,8 +51,7 @@ class LocalTranscriptStore {
     'summary': a.summary,
     'keyPoints': a.keyPoints,
     'nextSteps': [
-      for (final s in a.nextSteps)
-        {'title': s.title, 'action': s.action},
+      for (final s in a.nextSteps) {'title': s.title, 'action': s.action},
     ],
     'scores': {
       'overall': a.scores.overall,
@@ -65,9 +65,7 @@ class LocalTranscriptStore {
     ],
     'sentimentNote': a.sentimentNote,
     'followUpSuggestion': a.followUpSuggestion,
-    'sentimentTimeline': [
-      for (final s in a.sentimentTimeline) s.toJson(),
-    ],
+    'sentimentTimeline': [for (final s in a.sentimentTimeline) s.toJson()],
   };
 }
 

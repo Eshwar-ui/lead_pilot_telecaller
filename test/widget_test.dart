@@ -14,7 +14,9 @@ void main() {
 
   testWidgets('outbound sheet renders its required fields', (tester) async {
     await tester.pumpWidget(
-      const ProviderScope(child: MaterialApp(home: AddOutboundLeadScreen())),
+      const ProviderScope(
+        child: MaterialApp(home: Scaffold(body: AddOutboundLeadScreen())),
+      ),
     );
     await tester.pump();
 

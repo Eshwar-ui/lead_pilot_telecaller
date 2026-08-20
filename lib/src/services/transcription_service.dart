@@ -92,9 +92,12 @@ class SentimentSegment {
   final String label;
   final double avgScore; // -1.0..1.0
 
-  factory SentimentSegment.fromJson(Map<String, dynamic> json) => SentimentSegment(
+  factory SentimentSegment.fromJson(Map<String, dynamic> json) =>
+      SentimentSegment(
         label: (json['label'] ?? 'neutral').toString(),
-        avgScore: (json['avg_score'] is num) ? (json['avg_score'] as num).toDouble() : 0.0,
+        avgScore: (json['avg_score'] is num)
+            ? (json['avg_score'] as num).toDouble()
+            : 0.0,
       );
 
   Map<String, dynamic> toJson() => {'label': label, 'avg_score': avgScore};
@@ -135,6 +138,7 @@ class CallAnalysis {
   final List<AnalysisBreakdownItem> breakdown;
   final String sentimentNote;
   final String followUpSuggestion;
+
   /// Real per-slice sentiment from `/score` (was hardcoded bars in the UI).
   final List<SentimentSegment> sentimentTimeline;
 
@@ -158,7 +162,10 @@ class CallAnalysis {
       breakdown: list(json['breakdown'], AnalysisBreakdownItem.fromJson),
       sentimentNote: (json['sentimentNote'] ?? '').toString(),
       followUpSuggestion: (json['followUpSuggestion'] ?? '').toString(),
-      sentimentTimeline: list(json['sentimentTimeline'], SentimentSegment.fromJson),
+      sentimentTimeline: list(
+        json['sentimentTimeline'],
+        SentimentSegment.fromJson,
+      ),
     );
   }
 }
@@ -168,12 +175,17 @@ class CallTranscription {
   const CallTranscription({
     required this.transcript,
     required this.entries,
+    this.callId,
     this.language,
     this.transcriptEn,
     this.analysis,
   });
 
   final String transcript;
+
+  /// Backend ID for this exact call. Lets the post-call capture flow open the
+  /// persisted Call Details screen once processing is complete.
+  final String? callId;
   final String? transcriptEn;
   final String? language;
   final List<TranscriptEntry> entries;
@@ -189,6 +201,7 @@ class CallTranscription {
     final rawAnalysis = json['analysis'];
     return CallTranscription(
       transcript: (json['transcript'] ?? '').toString(),
+      callId: json['callId']?.toString(),
       transcriptEn: json['transcriptEn']?.toString(),
       language: json['languageCode']?.toString(),
       entries: entries,
@@ -207,7 +220,8 @@ class CallTranscription {
 ///   * poll `GET /api/calls/{id}/processing-status` until `done`/`failed`.
 ///   * `GET /api/calls/{id}/transcript` + `/lead-analysis` → assemble result.
 class TranscriptionService {
-  const TranscriptionService({String? Function()? getToken}) : _getToken = getToken;
+  const TranscriptionService({String? Function()? getToken})
+    : _getToken = getToken;
 
   static const Duration _pollInterval = Duration(seconds: 3);
   static const Duration _pollTimeout = Duration(minutes: 5);
@@ -244,7 +258,8 @@ class TranscriptionService {
     // Reuse a previously-uploaded call (from the local ledger) instead of
     // re-uploading the same recording file — avoids a redundant upload +
     // re-processing round-trip after an app restart / folder re-scan.
-    final callId = existingCallId ??
+    final callId =
+        existingCallId ??
         await _upload(
           recording: recording,
           leadId: leadId,
@@ -366,8 +381,9 @@ class TranscriptionService {
         );
       }
       final stage = decoded['current_stage']?.toString() ?? '';
-      final percent =
-          decoded['percent'] is num ? (decoded['percent'] as num).round() : 0;
+      final percent = decoded['percent'] is num
+          ? (decoded['percent'] as num).round()
+          : 0;
 
       onProgress?.call(stage, percent);
 
@@ -409,8 +425,9 @@ class TranscriptionService {
       if (turns is List)
         for (final t in turns.whereType<Map<String, dynamic>>())
           {
-            'speakerId':
-                (t['role']?.toString().toUpperCase() == 'AGENT') ? '0' : '1',
+            'speakerId': (t['role']?.toString().toUpperCase() == 'AGENT')
+                ? '0'
+                : '1',
             'text': (t['content'] ?? t['text'] ?? '').toString(),
           },
     ];
@@ -423,6 +440,7 @@ class TranscriptionService {
     final scoreData = results[1];
 
     return CallTranscription.fromJson({
+      'callId': callId,
       'transcript': transcript['full_text'] ?? '',
       'languageCode': transcript['language'],
       'entries': entries,
@@ -437,8 +455,10 @@ class TranscriptionService {
         .get(ApiConfig.uri(path), headers: _authHeaders)
         .timeout(ApiConfig.timeout);
     if (res.statusCode < 200 || res.statusCode >= 300) {
-      throw ApiException('GET $path failed (${res.statusCode}).',
-          statusCode: res.statusCode);
+      throw ApiException(
+        'GET $path failed (${res.statusCode}).',
+        statusCode: res.statusCode,
+      );
     }
     final decoded = jsonDecode(res.body);
     return decoded is Map<String, dynamic> ? decoded : const {};
@@ -521,19 +541,36 @@ class TranscriptionService {
               },
           ]
         : [
-            {'label': 'Opening', 'score': pct(debrief['opening_score']), 'note': ''},
-            {'label': 'Discovery', 'score': pct(debrief['discovery_score']), 'note': ''},
-            {'label': 'Pitch', 'score': pct(debrief['pitch_score']), 'note': ''},
+            {
+              'label': 'Opening',
+              'score': pct(debrief['opening_score']),
+              'note': '',
+            },
+            {
+              'label': 'Discovery',
+              'score': pct(debrief['discovery_score']),
+              'note': '',
+            },
+            {
+              'label': 'Pitch',
+              'score': pct(debrief['pitch_score']),
+              'note': '',
+            },
             {
               'label': 'Objection Handling',
               'score': pct(debrief['objection_handling_score']),
               'note': '',
             },
-            {'label': 'Closing', 'score': pct(debrief['closing_score']), 'note': ''},
+            {
+              'label': 'Closing',
+              'score': pct(debrief['closing_score']),
+              'note': '',
+            },
           ];
 
     return {
-      'summary': (summary['headline'] ?? la['lead_verdict_reason'] ?? '').toString(),
+      'summary': (summary['headline'] ?? la['lead_verdict_reason'] ?? '')
+          .toString(),
       'keyPoints': la['key_points'] is List ? la['key_points'] : const [],
       'nextSteps': [
         if (la['next_steps'] is List)
@@ -546,19 +583,26 @@ class TranscriptionService {
       'scores': {
         'overall': hasScore ? ringVal('overall') : pct(debrief['total_score']),
         'telecaller': ringVal('telecaller'),
-        'leadQuality': hasScore ? ringVal('lead_quality') : pct(la['bant_score']),
+        'leadQuality': hasScore
+            ? ringVal('lead_quality')
+            : pct(la['bant_score']),
         'sentiment': ringVal('sentiment'),
       },
       'breakdown': breakdown,
       // Real sentiment timeline from /score (segments + caption). Falls back to
       // the overall_tone word when /score didn't return a timeline.
-      'sentimentTimeline': timeline['segments'] is List ? timeline['segments'] : const [],
-      'sentimentNote': (timelineCaption.isNotEmpty
-              ? timelineCaption
-              : (summary['overall_tone'] ?? '').toString())
-          .toString(),
+      'sentimentTimeline': timeline['segments'] is List
+          ? timeline['segments']
+          : const [],
+      'sentimentNote':
+          (timelineCaption.isNotEmpty
+                  ? timelineCaption
+                  : (summary['overall_tone'] ?? '').toString())
+              .toString(),
       'followUpSuggestion':
-          (nextAction['follow_up_script'] ?? nextAction['recommended_action'] ?? '')
+          (nextAction['follow_up_script'] ??
+                  nextAction['recommended_action'] ??
+                  '')
               .toString(),
     };
   }

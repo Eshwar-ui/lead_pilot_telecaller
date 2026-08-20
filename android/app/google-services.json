@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "485775514266",
+    "project_id": "lead-pilot-1ffe3",
+    "storage_bucket": "lead-pilot-1ffe3.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:485775514266:android:1a5053d672a8ad34369d23",
+        "android_client_info": {
+          "package_name": "com.example.lead_pilot_telecaller"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAcoAAXFtxLNAGdmOJ6NIANN9o1yszkf5Q"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

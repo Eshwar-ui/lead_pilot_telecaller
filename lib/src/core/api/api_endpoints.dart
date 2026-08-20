@@ -89,6 +89,10 @@ class ApiEndpoints {
   // Organization profile (Profile screen's org card)
   static const String orgProfile = '/api/auth/org';
 
+  // FCM device token registration (push_notification_service.dart) — so
+  // push_notifications.py on the backend has somewhere to send to.
+  static const String fcmToken = '/api/auth/fcm-token';
+
   // Device call-log sync (every inbound/outbound/missed call, not just calls
   // placed through this app's own dialer button) — a sibling of /api/calls,
   // not nested under it, so it can't collide with calls.py's

@@ -83,4 +83,39 @@ class NotificationService {
     if (!_ready) return;
     await _plugin.cancel(notifId);
   }
+
+  /// Shows a notification immediately — used by [PushNotificationService] for
+  /// a push (FCM) message that arrives while the app is in the foreground.
+  /// FCM only auto-displays a "notification" payload via the OS tray while
+  /// backgrounded/terminated; a foregrounded app has to render it itself,
+  /// same as any other in-app toast/banner would. Reuses this plugin
+  /// instance rather than a second one so both notification types share one
+  /// initialization and one Android notification-permission prompt.
+  Future<void> showNow({
+    required int notifId,
+    required String title,
+    required String body,
+  }) async {
+    if (!_ready) return;
+    await _plugin.show(
+      notifId,
+      title,
+      body,
+      const NotificationDetails(
+        android: AndroidNotificationDetails(
+          'push_channel',
+          'Updates',
+          channelDescription: 'Updates from your founder — lead assignments, stage changes, account changes',
+          importance: Importance.high,
+          priority: Priority.high,
+          icon: '@mipmap/ic_launcher',
+        ),
+        iOS: DarwinNotificationDetails(
+          presentAlert: true,
+          presentBadge: true,
+          presentSound: true,
+        ),
+      ),
+    );
+  }
 }

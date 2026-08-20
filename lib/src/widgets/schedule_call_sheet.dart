@@ -12,6 +12,50 @@ import '../theme/app_colors.dart';
 import '../theme/app_theme.dart';
 import 'leadpilot_widgets.dart';
 
+/// Pure: builds the [FollowUpTask] and its overdue/due-today classification
+/// from the picked date/time and note, given [now] explicitly rather than
+/// reading `DateTime.now()` internally — pulled out of
+/// [_ScheduleCallSheetState._save] so this date/time math (and the
+/// overdue -> "skip the device notification" branch it feeds) can be unit
+/// tested deterministically instead of only through a widget pump.
+({FollowUpTask task, bool isOverdue, DateTime scheduledAt}) buildFollowUpTask({
+  required DateTime date,
+  required TimeOfDay time,
+  required String noteText,
+  required Lead lead,
+  required String id,
+  required DateTime now,
+}) {
+  final scheduledAt = DateTime(
+    date.year,
+    date.month,
+    date.day,
+    time.hour,
+    time.minute,
+  );
+  final isToday =
+      scheduledAt.year == now.year &&
+      scheduledAt.month == now.month &&
+      scheduledAt.day == now.day;
+  final isOverdue = scheduledAt.isBefore(now);
+  final trimmedNote = noteText.trim();
+  final task = FollowUpTask(
+    id: id,
+    taskText: trimmedNote.isEmpty
+        ? 'Follow-up call with ${lead.name}'
+        : trimmedNote,
+    leadName: lead.name,
+    phone: lead.phone,
+    leadId: lead.id,
+    status: isOverdue ? FollowUpStatus.overdue : FollowUpStatus.pending,
+    dueLabel: DateFormat('dd MMM · hh:mm a').format(scheduledAt),
+    dueToday: isToday,
+    scheduledAt: scheduledAt,
+    note: trimmedNote.isEmpty ? null : trimmedNote,
+  );
+  return (task: task, isOverdue: isOverdue, scheduledAt: scheduledAt);
+}
+
 class ScheduleCallSheet extends ConsumerStatefulWidget {
   const ScheduleCallSheet({
     super.key,
@@ -32,19 +76,18 @@ class ScheduleCallSheet extends ConsumerStatefulWidget {
     Lead lead, {
     int daysAhead = 1,
     String? initialNote,
-  }) =>
-      showModalBottomSheet<void>(
-        context: context,
-        isScrollControlled: true,
-        shape: const RoundedRectangleBorder(
-          borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-        ),
-        builder: (_) => ScheduleCallSheet(
-          lead: lead,
-          defaultDaysAhead: daysAhead,
-          initialNote: initialNote,
-        ),
-      );
+  }) => showModalBottomSheet<void>(
+    context: context,
+    isScrollControlled: true,
+    shape: const RoundedRectangleBorder(
+      borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+    ),
+    builder: (_) => ScheduleCallSheet(
+      lead: lead,
+      defaultDaysAhead: daysAhead,
+      initialNote: initialNote,
+    ),
+  );
 
   @override
   ConsumerState<ScheduleCallSheet> createState() => _ScheduleCallSheetState();
@@ -87,40 +130,26 @@ class _ScheduleCallSheetState extends ConsumerState<ScheduleCallSheet> {
   Future<void> _save() async {
     setState(() => _saving = true);
     try {
-      final scheduledAt = DateTime(
-        _date.year, _date.month, _date.day, _time.hour, _time.minute,
-      );
-      final today = DateTime.now();
-      final isToday = scheduledAt.year == today.year &&
-          scheduledAt.month == today.month &&
-          scheduledAt.day == today.day;
-      final isOverdue = scheduledAt.isBefore(today);
-
-      final id = '${DateTime.now().millisecondsSinceEpoch}_${Random().nextInt(9999)}';
-      final task = FollowUpTask(
+      final id =
+          '${DateTime.now().millisecondsSinceEpoch}_${Random().nextInt(9999)}';
+      final built = buildFollowUpTask(
+        date: _date,
+        time: _time,
+        noteText: _noteController.text,
+        lead: widget.lead,
         id: id,
-        taskText: _noteController.text.trim().isEmpty
-            ? 'Follow-up call with ${widget.lead.name}'
-            : _noteController.text.trim(),
-        leadName: widget.lead.name,
-        phone: widget.lead.phone,
-        leadId: widget.lead.id,
-        status: isOverdue ? FollowUpStatus.overdue : FollowUpStatus.pending,
-        dueLabel: DateFormat('dd MMM · hh:mm a').format(scheduledAt),
-        dueToday: isToday,
-        scheduledAt: scheduledAt,
-        note: _noteController.text.trim().isEmpty ? null : _noteController.text.trim(),
+        now: DateTime.now(),
       );
 
-      await ref.read(followUpsProvider.notifier).schedule(task);
+      await ref.read(followUpsProvider.notifier).schedule(built.task);
 
       // Schedule a device notification at the chosen time.
-      if (!isOverdue) {
+      if (!built.isOverdue) {
         await NotificationService.instance.scheduleFollowUp(
           notifId: id.hashCode.abs() % 100000,
           title: 'Follow-up: ${widget.lead.name}',
-          body: task.taskText,
-          scheduledAt: scheduledAt,
+          body: built.task.taskText,
+          scheduledAt: built.scheduledAt,
         );
       }
 
@@ -155,7 +184,10 @@ class _ScheduleCallSheetState extends ConsumerState<ScheduleCallSheet> {
               ),
             ),
           ),
-          Text('Schedule Call', style: AppText.display20.copyWith(fontSize: 18)),
+          Text(
+            'Schedule Call',
+            style: AppText.display20.copyWith(fontSize: 18),
+          ),
           Text(
             widget.lead.name,
             style: AppText.body13.copyWith(color: AppColors.schooner),

@@ -11,11 +11,59 @@ import 'leadpilot_widgets.dart';
 /// quoted price, letting margin (list_price - deal_value) be tracked at all
 /// (PRD Layer 4-C, previously not captured anywhere in this app).
 class DealClosedResult {
-  const DealClosedResult({required this.dealValue, this.listPrice, this.discountPct});
+  const DealClosedResult({
+    required this.dealValue,
+    this.listPrice,
+    this.discountPct,
+  });
 
   final int dealValue;
   final int? listPrice;
   final double? discountPct;
+}
+
+/// Either a validation [error] to show the user, or the [result] to return
+/// from the sheet — never both.
+class DealClosedValidation {
+  const DealClosedValidation.error(this.error) : result = null;
+  const DealClosedValidation.ok(this.result) : error = null;
+
+  final String? error;
+  final DealClosedResult? result;
+}
+
+/// Pure form-validation + discount-math logic, pulled out of
+/// [_DealClosedSheetState] so it can be unit tested directly instead of only
+/// through a widget pump.
+DealClosedValidation validateDealClosedInputs({
+  required String dealValueText,
+  required String listPriceText,
+}) {
+  final dealValue = int.tryParse(dealValueText.trim());
+  if (dealValue == null || dealValue <= 0) {
+    return const DealClosedValidation.error('Enter the final deal value');
+  }
+  final trimmedListPrice = listPriceText.trim();
+  if (trimmedListPrice.isEmpty) {
+    return DealClosedValidation.ok(DealClosedResult(dealValue: dealValue));
+  }
+  final listPrice = int.tryParse(trimmedListPrice);
+  if (listPrice == null || listPrice <= 0) {
+    return const DealClosedValidation.error('List price must be a number');
+  }
+  if (listPrice < dealValue) {
+    return const DealClosedValidation.error(
+      "List price can't be less than the deal value",
+    );
+  }
+  final discountPct = ((listPrice - dealValue) / listPrice) * 100;
+  return DealClosedValidation.ok(
+    DealClosedResult(
+      dealValue: dealValue,
+      listPrice: listPrice,
+      discountPct: discountPct,
+    ),
+  );
 }
 
 /// Shown when a telecaller taps the "Closed Won" pipeline stage chip.
@@ -50,29 +98,15 @@ class _DealClosedSheetState extends State<_DealClosedSheet> {
   }
 
   void _confirm() {
-    final dealValue = int.tryParse(_dealValueController.text.trim());
-    if (dealValue == null || dealValue <= 0) {
-      setState(() => _error = 'Enter the final deal value');
+    final validation = validateDealClosedInputs(
+      dealValueText: _dealValueController.text,
+      listPriceText: _listPriceController.text,
+    );
+    if (validation.error != null) {
+      setState(() => _error = validation.error);
       return;
     }
-    final listPriceText = _listPriceController.text.trim();
-    int? listPrice;
-    double? discountPct;
-    if (listPriceText.isNotEmpty) {
-      listPrice = int.tryParse(listPriceText);
-      if (listPrice == null || listPrice <= 0) {
-        setState(() => _error = 'List price must be a number');
-        return;
-      }
-      if (listPrice < dealValue) {
-        setState(() => _error = 'List price can\'t be less than the deal value');
-        return;
-      }
-      discountPct = listPrice == 0 ? 0 : ((listPrice - dealValue) / listPrice) * 100;
-    }
-    Navigator.of(context).pop(
-      DealClosedResult(dealValue: dealValue, listPrice: listPrice, discountPct: discountPct),
-    );
+    Navigator.of(context).pop(validation.result);
   }
 
   @override
@@ -99,7 +133,10 @@ class _DealClosedSheetState extends State<_DealClosedSheet> {
               ),
             ),
           ),
-          Text('Deal Closed 🎉', style: AppText.display20.copyWith(fontSize: 18)),
+          Text(
+            'Deal Closed 🎉',
+            style: AppText.display20.copyWith(fontSize: 18),
+          ),
           Text(
             'Record the final value — and the list price if you discounted to close.',
             style: AppText.body13.copyWith(color: AppColors.schooner),
@@ -144,7 +181,10 @@ class _DealClosedSheetState extends State<_DealClosedSheet> {
           ),
           if (_error != null) ...[
             const AppGap.xs(),
-            Text(_error!, style: AppText.body13.copyWith(color: AppColors.alizarin)),
+            Text(
+              _error!,
+              style: AppText.body13.copyWith(color: AppColors.alizarin),
+            ),
           ],
           const AppGap.lg(),
           SizedBox(

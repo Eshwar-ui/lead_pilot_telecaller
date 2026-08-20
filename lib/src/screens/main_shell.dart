@@ -2,7 +2,8 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:flutter_app_utilities/flutter_app_utilities.dart' hide AppSpacing;
+import 'package:flutter_app_utilities/flutter_app_utilities.dart'
+    hide AppSpacing;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../services/permission_bootstrap.dart';
@@ -13,6 +14,28 @@ import 'home_screen.dart';
 import 'calls_screen.dart';
 import 'follow_ups_screen.dart';
 import 'profile_screen.dart';
+
+/// What the Android back button should do while the tab shell is showing.
+enum BackPressAction { switchToInbox, showExitPrompt, exitApp }
+
+/// Pure decision behind [_MainShellState._handleBack]'s "press back again to
+/// exit" behaviour, pulled out so the timing logic can be tested without a
+/// widget pump:
+///  - Any non-Inbox tab -> switch to Inbox.
+///  - Inbox tab, first press (or >2s since the last one) -> show the prompt.
+///  - Inbox tab, a second press within 2s of the first -> actually exit.
+BackPressAction decideBackPressAction({
+  required int currentTab,
+  required DateTime? lastBackPress,
+  required DateTime now,
+}) {
+  if (currentTab != 0) return BackPressAction.switchToInbox;
+  if (lastBackPress == null ||
+      now.difference(lastBackPress) > const Duration(seconds: 2)) {
+    return BackPressAction.showExitPrompt;
+  }
+  return BackPressAction.exitApp;
+}
 
 class MainShell extends ConsumerStatefulWidget {
   const MainShell({super.key});
@@ -74,25 +97,27 @@ class _MainShellState extends ConsumerState<MainShell>
   ///  - On the Inbox tab, the first back shows "Press back again to exit" and
   ///    only a second press within 2s actually leaves the app.
   void _handleBack() {
-    if (_tab != 0) {
-      setState(() => _tab = 0);
-      return;
-    }
     final now = DateTime.now();
-    if (_lastBackPress == null ||
-        now.difference(_lastBackPress!) > const Duration(seconds: 2)) {
-      _lastBackPress = now;
-      ScaffoldMessenger.of(context)
-        ..clearSnackBars()
-        ..showSnackBar(
-          const SnackBar(
-            content: Text('Press back again to exit'),
-            duration: Duration(seconds: 2),
-          ),
-        );
-      return;
+    switch (decideBackPressAction(
+      currentTab: _tab,
+      lastBackPress: _lastBackPress,
+      now: now,
+    )) {
+      case BackPressAction.switchToInbox:
+        setState(() => _tab = 0);
+      case BackPressAction.showExitPrompt:
+        _lastBackPress = now;
+        ScaffoldMessenger.of(context)
+          ..clearSnackBars()
+          ..showSnackBar(
+            const SnackBar(
+              content: Text('Press back again to exit'),
+              duration: Duration(seconds: 2),
+            ),
+          );
+      case BackPressAction.exitApp:
+        SystemNavigator.pop();
     }
-    SystemNavigator.pop();
   }
 
   @override

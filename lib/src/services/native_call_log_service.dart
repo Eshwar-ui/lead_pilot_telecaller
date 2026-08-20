@@ -19,7 +19,8 @@ import '../models/lead.dart';
 class NativeCallLogService {
   const NativeCallLogService();
 
-  Future<bool> hasPermission() async => (await Permission.phone.status).isGranted;
+  Future<bool> hasPermission() async =>
+      (await Permission.phone.status).isGranted;
 
   Future<bool> requestPermission() async =>
       (await Permission.phone.request()).isGranted;
@@ -31,13 +32,16 @@ class NativeCallLogService {
     if (!await hasPermission()) return const [];
     try {
       final entries = await device_call_log.CallLog.query(dateTimeFrom: since);
-      return [for (final e in entries) ?_toAppEntry(e)];
+      return [for (final e in entries) ?toAppEntry(e)];
     } catch (_) {
       return const [];
     }
   }
 
-  CallLogEntry? _toAppEntry(device_call_log.CallLogEntry e) {
+  /// Public (not `_`-prefixed) so this mapping can be unit tested directly —
+  /// [fetchSince] itself can't be, since it goes through the real
+  /// `permission_handler`/`call_log` platform channels.
+  static CallLogEntry? toAppEntry(device_call_log.CallLogEntry e) {
     final number = e.number;
     final ts = e.timestamp;
     if (number == null || number.isEmpty || ts == null) return null;
@@ -55,19 +59,22 @@ class NativeCallLogService {
       duration: Duration(seconds: e.duration ?? 0),
       score: 0,
       calledAt: DateTime.fromMillisecondsSinceEpoch(ts),
-      isInbound: _isInbound(e.callType),
+      isInbound: isInboundCallType(e.callType),
       deviceCallId: e.id,
     );
   }
 
-  bool _isInbound(device_call_log.CallType? type) => switch (type) {
-    device_call_log.CallType.outgoing ||
-    device_call_log.CallType.wifiOutgoing => false,
-    // incoming, missed, rejected, blocked, voicemail, answeredExternally,
-    // unknown, wifiIncoming — everything else reads as "not one I placed".
-    _ => true,
-  };
+  /// Public for the same testing reason as [toAppEntry].
+  static bool isInboundCallType(device_call_log.CallType? type) =>
+      switch (type) {
+        device_call_log.CallType.outgoing ||
+        device_call_log.CallType.wifiOutgoing => false,
+        // incoming, missed, rejected, blocked, voicemail, answeredExternally,
+        // unknown, wifiIncoming — everything else reads as "not one I placed".
+        _ => true,
+      };
 }
 
-final nativeCallLogServiceProvider =
-    Provider<NativeCallLogService>((_) => const NativeCallLogService());
+final nativeCallLogServiceProvider = Provider<NativeCallLogService>(
+  (_) => const NativeCallLogService(),
+);

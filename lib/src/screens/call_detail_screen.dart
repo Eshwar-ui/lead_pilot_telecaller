@@ -16,10 +16,85 @@ import '../widgets/schedule_call_sheet.dart';
 /// banner (Summary/Score/Transcript) so they all describe the source
 /// language the same way.
 const _langNames = {
-  'en': 'English', 'hi': 'Hindi', 'te': 'Telugu', 'ta': 'Tamil',
-  'kn': 'Kannada', 'ml': 'Malayalam', 'mr': 'Marathi', 'bn': 'Bengali',
-  'gu': 'Gujarati', 'pa': 'Punjabi',
+  'en': 'English',
+  'hi': 'Hindi',
+  'te': 'Telugu',
+  'ta': 'Tamil',
+  'kn': 'Kannada',
+  'ml': 'Malayalam',
+  'mr': 'Marathi',
+  'bn': 'Bengali',
+  'gu': 'Gujarati',
+  'pa': 'Punjabi',
 };
+
+/// Splits a flat, index-aligned [translated] list (as returned by
+/// `translateTexts`) back into per-key-point + per-next-step translations.
+/// Pulled out of `_CallDetailScreenState._toggleSummaryEnglish` so this index
+/// math — fragile to any length mismatch from the backend — can be tested
+/// directly.
+({List<String> keyPoints, List<Map<String, dynamic>> nextSteps})
+reassembleTranslatedSummary({
+  required List<String> keyPoints,
+  required List<Map> nextSteps,
+  required List<String> translated,
+}) {
+  final translatedKeyPoints = translated.take(keyPoints.length).toList();
+  final translatedNextStepTexts = translated.skip(keyPoints.length).toList();
+  return (
+    keyPoints: translatedKeyPoints,
+    nextSteps: [
+      for (var i = 0; i < nextSteps.length; i++)
+        {
+          ...Map<String, dynamic>.from(nextSteps[i]),
+          if (nextSteps[i].containsKey('text'))
+            'text': translatedNextStepTexts[i],
+          if (nextSteps[i].containsKey('title'))
+            'title': translatedNextStepTexts[i],
+        },
+    ],
+  );
+}
+
+/// Splits a flat, index-aligned [translated] list back into the per-dimension
+/// breakdown notes/evidence + the overall relevance reason. Pulled out of
+/// `_CallDetailScreenState._toggleScoreEnglish` for the same testing reason
+/// as [reassembleTranslatedSummary].
+({List<Map<String, dynamic>> breakdown, String? relevanceReason})
+reassembleTranslatedScore({
+  required List<Map> breakdown,
+  required List<String> notes,
+  required String relevanceReason,
+  required List<List<Map>> evidenceLists,
+  required List<String> translated,
+}) {
+  var cursor = 0;
+  final translatedNotes = translated.sublist(cursor, cursor + notes.length);
+  cursor += notes.length;
+  String? translatedRelevance;
+  if (relevanceReason.isNotEmpty) {
+    translatedRelevance = translated[cursor];
+    cursor += 1;
+  }
+  final translatedEvidence = translated.sublist(cursor);
+
+  var evIdx = 0;
+  final newBreakdown = [
+    for (var i = 0; i < breakdown.length; i++)
+      {
+        ...Map<String, dynamic>.from(breakdown[i]),
+        'note': translatedNotes[i],
+        'evidence': [
+          for (final q in evidenceLists[i])
+            {
+              ...Map<String, dynamic>.from(q),
+              'text': translatedEvidence[evIdx++],
+            },
+        ],
+      },
+  ];
+  return (breakdown: newBreakdown, relevanceReason: translatedRelevance);
+}
 
 /// Passed via `go_router`'s `extra` when navigating here from a known
 /// [CallRecord] (Lead Detail's history list) so this screen doesn't have to
@@ -96,13 +171,17 @@ class _CallDetailScreenState extends ConsumerState<CallDetailScreen> {
   Future<_CallDetailData> _load() async {
     final repo = ref.read(leadRepositoryProvider);
     final transcript = await repo.transcript(widget.callId);
-    final analysis = await repo.leadAnalysis(widget.callId).catchError(
-          (_) => <String, dynamic>{},
-        );
-    final score = await repo.callScore(widget.callId).catchError(
-          (_) => <String, dynamic>{},
-        );
-    return _CallDetailData(transcript: transcript, analysis: analysis, score: score);
+    final analysis = await repo
+        .leadAnalysis(widget.callId)
+        .catchError((_) => <String, dynamic>{});
+    final score = await repo
+        .callScore(widget.callId)
+        .catchError((_) => <String, dynamic>{});
+    return _CallDetailData(
+      transcript: transcript,
+      analysis: analysis,
+      score: score,
+    );
   }
 
   Future<void> _toggleEnglish() async {
@@ -116,8 +195,9 @@ class _CallDetailScreenState extends ConsumerState<CallDetailScreen> {
     }
     setState(() => _translating = true);
     try {
-      final turns =
-          await ref.read(leadRepositoryProvider).translatedTranscript(widget.callId);
+      final turns = await ref
+          .read(leadRepositoryProvider)
+          .translatedTranscript(widget.callId);
       if (!mounted) return;
       setState(() {
         _translated = turns;
@@ -156,22 +236,19 @@ class _CallDetailScreenState extends ConsumerState<CallDetailScreen> {
       final nextStepTexts = [
         for (final s in nextSteps) (s['text'] ?? s['title'] ?? '').toString(),
       ];
-      final translated = await ref
-          .read(leadRepositoryProvider)
-          .translateTexts([...keyPoints, ...nextStepTexts]);
+      final translated = await ref.read(leadRepositoryProvider).translateTexts([
+        ...keyPoints,
+        ...nextStepTexts,
+      ]);
       if (!mounted) return;
-      final translatedKeyPoints = translated.take(keyPoints.length).toList();
-      final translatedNextStepTexts = translated.skip(keyPoints.length).toList();
+      final reassembled = reassembleTranslatedSummary(
+        keyPoints: keyPoints,
+        nextSteps: nextSteps,
+        translated: translated,
+      );
       final newAnalysis = Map<String, dynamic>.from(analysis);
-      newAnalysis['key_points'] = translatedKeyPoints;
-      newAnalysis['next_steps'] = [
-        for (var i = 0; i < nextSteps.length; i++)
-          {
-            ...Map<String, dynamic>.from(nextSteps[i]),
-            if (nextSteps[i].containsKey('text')) 'text': translatedNextStepTexts[i],
-            if (nextSteps[i].containsKey('title')) 'title': translatedNextStepTexts[i],
-          },
-      ];
+      newAnalysis['key_points'] = reassembled.keyPoints;
+      newAnalysis['next_steps'] = reassembled.nextSteps;
       setState(() {
         _translatedAnalysis = newAnalysis;
         _showSummaryEnglish = true;
@@ -204,7 +281,9 @@ class _CallDetailScreenState extends ConsumerState<CallDetailScreen> {
       final notes = [for (final b in breakdown) (b['note'] ?? '').toString()];
       final evidenceLists = [
         for (final b in breakdown)
-          (b['evidence'] is List ? (b['evidence'] as List).whereType<Map>().toList() : <Map>[]),
+          (b['evidence'] is List
+              ? (b['evidence'] as List).whereType<Map>().toList()
+              : <Map>[]),
       ];
       final evidenceTexts = [
         for (final list in evidenceLists)
@@ -217,36 +296,19 @@ class _CallDetailScreenState extends ConsumerState<CallDetailScreen> {
       ]);
       if (!mounted) return;
 
-      var cursor = 0;
-      final translatedNotes = translated.sublist(cursor, cursor + notes.length);
-      cursor += notes.length;
-      String? translatedRelevance;
-      if (relevanceReason.isNotEmpty) {
-        translatedRelevance = translated[cursor];
-        cursor += 1;
-      }
-      final translatedEvidence = translated.sublist(cursor);
-
-      var evIdx = 0;
-      final newBreakdown = [
-        for (var i = 0; i < breakdown.length; i++)
-          {
-            ...Map<String, dynamic>.from(breakdown[i]),
-            'note': translatedNotes[i],
-            'evidence': [
-              for (final q in evidenceLists[i])
-                {
-                  ...Map<String, dynamic>.from(q),
-                  'text': translatedEvidence[evIdx++],
-                },
-            ],
-          },
-      ];
+      final reassembled = reassembleTranslatedScore(
+        breakdown: breakdown,
+        notes: notes,
+        relevanceReason: relevanceReason,
+        evidenceLists: evidenceLists,
+        translated: translated,
+      );
       setState(() {
         _translatedScore = {
           ...Map<String, dynamic>.from(rings),
-          'breakdown': newBreakdown,
-          if (translatedRelevance != null) 'relevance_reason': translatedRelevance,
+          'breakdown': reassembled.breakdown,
+          if (reassembled.relevanceReason != null)
+            'relevance_reason': reassembled.relevanceReason,
         };
         _showScoreEnglish = true;
       });
@@ -266,7 +328,9 @@ class _CallDetailScreenState extends ConsumerState<CallDetailScreen> {
 
   Future<void> _saveKeyPoints(List<String> keyPoints) async {
     try {
-      await ref.read(leadRepositoryProvider).updateKeyPoints(widget.callId, keyPoints);
+      await ref
+          .read(leadRepositoryProvider)
+          .updateKeyPoints(widget.callId, keyPoints);
       if (!mounted) return;
       setState(() => _future = _load());
       _toast('Key points updated.');
@@ -323,7 +387,8 @@ class _CallDetailScreenState extends ConsumerState<CallDetailScreen> {
             }
 
             final data = snapshot.data!;
-            final overall = _toInt(data.score['rings']?['overall']?['value']) ??
+            final overall =
+                _toInt(data.score['rings']?['overall']?['value']) ??
                 _toInt(data.analysis['agent_debrief']?['total_score']);
             // Every analysed call is now scored on its own merits — even
             // off-topic / wrong-number calls (the analyzer no longer zeroes
@@ -333,7 +398,8 @@ class _CallDetailScreenState extends ConsumerState<CallDetailScreen> {
             final activeTurns = _showEnglish && _translated != null
                 ? _translated!
                 : data.transcript.turns;
-            final activeAnalysis = _showSummaryEnglish && _translatedAnalysis != null
+            final activeAnalysis =
+                _showSummaryEnglish && _translatedAnalysis != null
                 ? _translatedAnalysis!
                 : data.analysis;
             final activeScore = _showScoreEnglish && _translatedScore != null
@@ -362,7 +428,8 @@ class _CallDetailScreenState extends ConsumerState<CallDetailScreen> {
                         language: data.transcript.language,
                         showEnglish: _showSummaryEnglish,
                         translating: _summaryTranslating,
-                        onToggleEnglish: () => _toggleSummaryEnglish(data.analysis),
+                        onToggleEnglish: () =>
+                            _toggleSummaryEnglish(data.analysis),
                         onToast: _toast,
                         onSaveKeyPoints: _saveKeyPoints,
                       ),
@@ -440,7 +507,11 @@ class _CallDetailScreenState extends ConsumerState<CallDetailScreen> {
 }
 
 class _CallDetailData {
-  const _CallDetailData({required this.transcript, required this.analysis, required this.score});
+  const _CallDetailData({
+    required this.transcript,
+    required this.analysis,
+    required this.score,
+  });
 
   final TranscriptResult transcript;
   final Map<String, dynamic> analysis;
@@ -491,7 +562,12 @@ class _Header extends StatelessWidget {
       child: Column(
         children: [
           Padding(
-            padding: const EdgeInsets.fromLTRB(AppSpacing.xs, AppSpacing.xs, AppSpacing.xs, AppSpacing.xxs),
+            padding: const EdgeInsets.fromLTRB(
+              AppSpacing.xs,
+              AppSpacing.xs,
+              AppSpacing.xs,
+              AppSpacing.xxs,
+            ),
             child: Row(
               children: [
                 LpIconButton(
@@ -501,10 +577,13 @@ class _Header extends StatelessWidget {
                 Expanded(
                   child: Column(
                     children: [
-                      Text('CALL DETAIL', style: AppText.label11.copyWith(
-                        color: AppColors.schooner,
-                        letterSpacing: 0.6,
-                      )),
+                      Text(
+                        'CALL DETAIL',
+                        style: AppText.label11.copyWith(
+                          color: AppColors.schooner,
+                          letterSpacing: 0.6,
+                        ),
+                      ),
                       if (leadName.isNotEmpty)
                         Text(leadName, style: AppText.display16),
                     ],
@@ -529,11 +608,15 @@ class _Header extends StatelessWidget {
                   child: InkWell(
                     onTap: () => onTabChanged(i),
                     child: Container(
-                      padding: const EdgeInsets.symmetric(vertical: AppSpacing.sm),
+                      padding: const EdgeInsets.symmetric(
+                        vertical: AppSpacing.sm,
+                      ),
                       decoration: BoxDecoration(
                         border: Border(
                           bottom: BorderSide(
-                            color: tab == i ? AppColors.blueRibbon : Colors.transparent,
+                            color: tab == i
+                                ? AppColors.blueRibbon
+                                : Colors.transparent,
                             width: 2,
                           ),
                         ),
@@ -542,8 +625,12 @@ class _Header extends StatelessWidget {
                       child: Text(
                         _tabs[i],
                         style: AppText.body14.copyWith(
-                          fontWeight: tab == i ? FontWeight.w700 : FontWeight.w500,
-                          color: tab == i ? AppColors.blueRibbon : AppColors.schooner,
+                          fontWeight: tab == i
+                              ? FontWeight.w700
+                              : FontWeight.w500,
+                          color: tab == i
+                              ? AppColors.blueRibbon
+                              : AppColors.schooner,
                         ),
                       ),
                     ),
@@ -603,8 +690,12 @@ class _SummaryTab extends ConsumerWidget {
     final nextSteps = (analysis['next_steps'] is List)
         ? (analysis['next_steps'] as List).whereType<Map>().toList()
         : const <Map>[];
-    final langName = language != null ? (_langNames[language] ?? language!) : null;
-    final isNonEnglish = language != null && language != 'en' &&
+    final langName = language != null
+        ? (_langNames[language] ?? language!)
+        : null;
+    final isNonEnglish =
+        language != null &&
+        language != 'en' &&
         (keyPoints.isNotEmpty || nextSteps.isNotEmpty);
 
     final followUps = ref.watch(followUpsProvider);
@@ -639,7 +730,11 @@ class _SummaryTab extends ConsumerWidget {
                       children: [
                         const Padding(
                           padding: EdgeInsets.only(top: AppSpacing.xs),
-                          child: Icon(Icons.circle, size: 5, color: AppColors.blueRibbon),
+                          child: Icon(
+                            Icons.circle,
+                            size: 5,
+                            color: AppColors.blueRibbon,
+                          ),
                         ),
                         const AppGap.xs(axis: Axis.horizontal),
                         Expanded(child: Text(p, style: AppText.body14)),
@@ -648,7 +743,11 @@ class _SummaryTab extends ConsumerWidget {
                           onTap: () => _openEditKeyPoints(context, keyPoints),
                           child: const Padding(
                             padding: EdgeInsets.all(AppSpacing.xxs),
-                            child: Icon(Icons.edit_outlined, size: 15, color: AppColors.schooner),
+                            child: Icon(
+                              Icons.edit_outlined,
+                              size: 15,
+                              color: AppColors.schooner,
+                            ),
                           ),
                         ),
                       ],
@@ -678,12 +777,20 @@ class _SummaryTab extends ConsumerWidget {
                             color: AppColors.pampas,
                             borderRadius: BorderRadius.circular(AppRadius.xs),
                           ),
-                          child: Text('${i + 1}', style: AppText.caption11.copyWith(fontWeight: FontWeight.w700)),
+                          child: Text(
+                            '${i + 1}',
+                            style: AppText.caption11.copyWith(
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
                         ),
                         const AppGap.sm(axis: Axis.horizontal),
                         Expanded(
                           child: Text(
-                            (nextSteps[i]['text'] ?? nextSteps[i]['title'] ?? '').toString(),
+                            (nextSteps[i]['text'] ??
+                                    nextSteps[i]['title'] ??
+                                    '')
+                                .toString(),
                             style: AppText.body14,
                           ),
                         ),
@@ -691,7 +798,10 @@ class _SummaryTab extends ConsumerWidget {
                           onPressed: () => _actOnNextStep(
                             context,
                             ref,
-                            (nextSteps[i]['text'] ?? nextSteps[i]['title'] ?? '').toString(),
+                            (nextSteps[i]['text'] ??
+                                    nextSteps[i]['title'] ??
+                                    '')
+                                .toString(),
                           ),
                           child: Text(
                             (nextSteps[i]['action_label'] ?? 'Note').toString(),
@@ -719,7 +829,11 @@ class _SummaryTab extends ConsumerWidget {
             ),
             child: Row(
               children: [
-                const Icon(Icons.event_available, color: AppColors.salem, size: 18),
+                const Icon(
+                  Icons.event_available,
+                  color: AppColors.salem,
+                  size: 18,
+                ),
                 const AppGap.sm(axis: Axis.horizontal),
                 Expanded(
                   child: Column(
@@ -731,22 +845,33 @@ class _SummaryTab extends ConsumerWidget {
                       ),
                       Text(
                         followUp.dueLabel ?? '',
-                        style: AppText.body14.copyWith(fontWeight: FontWeight.w700),
+                        style: AppText.body14.copyWith(
+                          fontWeight: FontWeight.w700,
+                        ),
                       ),
                     ],
                   ),
                 ),
                 TextButton(
                   onPressed: () {
-                    final matches = ref.read(leadsProvider).where((l) => l.id == leadId);
-                    if (matches.isNotEmpty) ScheduleCallSheet.show(context, matches.first);
+                    final matches = ref
+                        .read(leadsProvider)
+                        .where((l) => l.id == leadId);
+                    if (matches.isNotEmpty) {
+                      ScheduleCallSheet.show(context, matches.first);
+                    }
                   },
                   child: const Text('Edit'),
                 ),
                 TextButton(
                   onPressed: () =>
                       ref.read(followUpsProvider.notifier).delete(followUp.id),
-                  child: Text('Cancel', style: AppText.caption11.copyWith(color: AppColors.alizarin)),
+                  child: Text(
+                    'Cancel',
+                    style: AppText.caption11.copyWith(
+                      color: AppColors.alizarin,
+                    ),
+                  ),
                 ),
               ],
             ),
@@ -770,14 +895,16 @@ class _SummaryTab extends ConsumerWidget {
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
-      builder: (_) => _EditKeyPointsSheet(
-        initial: keyPoints,
-        onSave: onSaveKeyPoints,
-      ),
+      builder: (_) =>
+          _EditKeyPointsSheet(initial: keyPoints, onSave: onSaveKeyPoints),
     );
   }
 
-  Future<void> _actOnNextStep(BuildContext context, WidgetRef ref, String stepText) async {
+  Future<void> _actOnNextStep(
+    BuildContext context,
+    WidgetRef ref,
+    String stepText,
+  ) async {
     try {
       final lead = await ref.read(leadRepositoryProvider).leadDetail(leadId);
       if (!context.mounted) return;
@@ -827,12 +954,21 @@ class _EditKeyPointsSheetState extends State<_EditKeyPointsSheet> {
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
+      padding: EdgeInsets.only(
+        bottom: MediaQuery.of(context).viewInsets.bottom,
+      ),
       child: Container(
-        padding: const EdgeInsets.fromLTRB(AppSpacing.lg, AppSpacing.lg, AppSpacing.lg, AppSpacing.xl),
+        padding: const EdgeInsets.fromLTRB(
+          AppSpacing.lg,
+          AppSpacing.lg,
+          AppSpacing.lg,
+          AppSpacing.xl,
+        ),
         decoration: const BoxDecoration(
           color: AppColors.springWood,
-          borderRadius: BorderRadius.vertical(top: Radius.circular(AppRadius.xl)),
+          borderRadius: BorderRadius.vertical(
+            top: Radius.circular(AppRadius.xl),
+          ),
         ),
         child: Column(
           mainAxisSize: MainAxisSize.min,
@@ -841,7 +977,9 @@ class _EditKeyPointsSheetState extends State<_EditKeyPointsSheet> {
             Text('Edit key points', style: AppText.display16),
             const AppGap.md(),
             ConstrainedBox(
-              constraints: BoxConstraints(maxHeight: MediaQuery.of(context).size.height * 0.5),
+              constraints: BoxConstraints(
+                maxHeight: MediaQuery.of(context).size.height * 0.5,
+              ),
               child: SingleChildScrollView(
                 child: Column(
                   children: [
@@ -855,12 +993,20 @@ class _EditKeyPointsSheetState extends State<_EditKeyPointsSheet> {
                                 controller: _controllers[i],
                                 style: AppText.body14,
                                 maxLines: null,
-                                decoration: const InputDecoration(isDense: true),
+                                decoration: const InputDecoration(
+                                  isDense: true,
+                                ),
                               ),
                             ),
                             IconButton(
-                              icon: const Icon(Icons.close, size: 18, color: AppColors.schooner),
-                              onPressed: () => setState(() => _controllers.removeAt(i).dispose()),
+                              icon: const Icon(
+                                Icons.close,
+                                size: 18,
+                                color: AppColors.schooner,
+                              ),
+                              onPressed: () => setState(
+                                () => _controllers.removeAt(i).dispose(),
+                              ),
                             ),
                           ],
                         ),
@@ -870,7 +1016,8 @@ class _EditKeyPointsSheetState extends State<_EditKeyPointsSheet> {
               ),
             ),
             TextButton.icon(
-              onPressed: () => setState(() => _controllers.add(TextEditingController())),
+              onPressed: () =>
+                  setState(() => _controllers.add(TextEditingController())),
               icon: const Icon(Icons.add, size: 18),
               label: const Text('Add point'),
             ),
@@ -909,10 +1056,13 @@ class _AnalysingBanner extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text('Analysing call…', style: AppText.body14.copyWith(
-                  color: AppColors.blueRibbon,
-                  fontWeight: FontWeight.w700,
-                )),
+                Text(
+                  'Analysing call…',
+                  style: AppText.body14.copyWith(
+                    color: AppColors.blueRibbon,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
                 Text(
                   'Key points and scores appear within 60 seconds',
                   style: AppText.caption11.copyWith(color: AppColors.schooner),
@@ -1000,10 +1150,14 @@ class _ScoreTab extends StatelessWidget {
     // low lead-quality rather than a "not a qualifying lead" empty-state.
     // `relevance_reason` (if any) is surfaced as a note below the rings.
     final relevanceReason = (rings['relevance_reason'] ?? '').toString();
-    final hasTranslatableText = relevanceReason.trim().isNotEmpty ||
+    final hasTranslatableText =
+        relevanceReason.trim().isNotEmpty ||
         breakdown.any((b) => (b['note'] ?? '').toString().trim().isNotEmpty);
-    final langName = language != null ? (_langNames[language] ?? language!) : null;
-    final isNonEnglish = language != null && language != 'en' && hasTranslatableText;
+    final langName = language != null
+        ? (_langNames[language] ?? language!)
+        : null;
+    final isNonEnglish =
+        language != null && language != 'en' && hasTranslatableText;
 
     return ListView(
       padding: const EdgeInsets.all(AppSpacing.md),
@@ -1028,13 +1182,19 @@ class _ScoreTab extends StatelessWidget {
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Icon(Icons.info_outline,
-                    size: 14, color: AppColors.schooner),
+                const Icon(
+                  Icons.info_outline,
+                  size: 14,
+                  color: AppColors.schooner,
+                ),
                 const AppGap.xs(axis: Axis.horizontal),
                 Expanded(
-                  child: Text('Relevance note: $relevanceReason',
-                      style: AppText.caption11
-                          .copyWith(color: AppColors.schooner)),
+                  child: Text(
+                    'Relevance note: $relevanceReason',
+                    style: AppText.caption11.copyWith(
+                      color: AppColors.schooner,
+                    ),
+                  ),
                 ),
               ],
             ),
@@ -1114,12 +1274,19 @@ class _RingTile extends StatelessWidget {
         children: [
           ScoreRing(score: value, size: 64),
           const AppGap.xs(),
-          Text(label, style: AppText.caption11.copyWith(fontWeight: FontWeight.w700)),
+          Text(
+            label,
+            style: AppText.caption11.copyWith(fontWeight: FontWeight.w700),
+          ),
           if (trend != null)
             Text(
-              trend > 0 ? '↑ ${trend.abs().round()}' : (trend < 0 ? '↓ ${trend.abs().round()}' : '—'),
+              trend > 0
+                  ? '↑ ${trend.abs().round()}'
+                  : (trend < 0 ? '↓ ${trend.abs().round()}' : '—'),
               style: AppText.caption11.copyWith(
-                color: trend > 0 ? AppColors.salem : (trend < 0 ? AppColors.alizarin : AppColors.schooner),
+                color: trend > 0
+                    ? AppColors.salem
+                    : (trend < 0 ? AppColors.alizarin : AppColors.schooner),
               ),
             ),
         ],
@@ -1147,10 +1314,15 @@ class _BreakdownRow extends StatelessWidget {
         children: [
           Row(
             children: [
-              Text((item['label'] ?? '').toString(),
-                  style: AppText.body14.copyWith(fontWeight: FontWeight.w700)),
+              Text(
+                (item['label'] ?? '').toString(),
+                style: AppText.body14.copyWith(fontWeight: FontWeight.w700),
+              ),
               const Spacer(),
-              Text('$score/$max', style: AppText.caption11.copyWith(color: AppColors.schooner)),
+              Text(
+                '$score/$max',
+                style: AppText.caption11.copyWith(color: AppColors.schooner),
+              ),
             ],
           ),
           const AppGap.xs(),
@@ -1160,13 +1332,17 @@ class _BreakdownRow extends StatelessWidget {
               value: progress,
               minHeight: 6,
               backgroundColor: AppColors.pampas,
-              valueColor: AlwaysStoppedAnimation(good ? AppColors.salem : AppColors.tahitiGold),
+              valueColor: AlwaysStoppedAnimation(
+                good ? AppColors.salem : AppColors.tahitiGold,
+              ),
             ),
           ),
           if ((item['note'] ?? '').toString().isNotEmpty) ...[
             const AppGap.xs(),
-            Text((item['note']).toString(),
-                style: AppText.caption11.copyWith(color: AppColors.schooner)),
+            Text(
+              (item['note']).toString(),
+              style: AppText.caption11.copyWith(color: AppColors.schooner),
+            ),
           ],
           // Audit trail: the backend attaches the transcript quotes the score
           // was grounded in (evidence: [{turn,t,speaker,text}]). Surface them so
@@ -1222,7 +1398,8 @@ class _SentimentTimelineCard extends StatelessWidget {
     'frustrated': AppColors.alizarin,
   };
 
-  String _mmss(int sec) => '${sec ~/ 60}:${(sec % 60).toString().padLeft(2, '0')}';
+  String _mmss(int sec) =>
+      '${sec ~/ 60}:${(sec % 60).toString().padLeft(2, '0')}';
 
   @override
   Widget build(BuildContext context) {
@@ -1237,7 +1414,11 @@ class _SentimentTimelineCard extends StatelessWidget {
         children: [
           Row(
             children: [
-              const Icon(Icons.auto_awesome, size: 14, color: AppColors.electricViolet),
+              const Icon(
+                Icons.auto_awesome,
+                size: 14,
+                color: AppColors.electricViolet,
+              ),
               const AppGap.xs(axis: Axis.horizontal),
               Text('SENTIMENT TIMELINE', style: AppText.label11),
             ],
@@ -1245,7 +1426,9 @@ class _SentimentTimelineCard extends StatelessWidget {
           if (segments.isEmpty) ...[
             const AppGap.sm(),
             Text(
-              caption.isNotEmpty ? caption : 'No sentiment signal in this call.',
+              caption.isNotEmpty
+                  ? caption
+                  : 'No sentiment signal in this call.',
               style: AppText.caption11.copyWith(color: AppColors.schooner),
             ),
           ] else ...[
@@ -1259,7 +1442,9 @@ class _SentimentTimelineCard extends StatelessWidget {
                     for (final s in segments)
                       Expanded(
                         child: Container(
-                          color: _colors[(s['label'] ?? '').toString()] ?? AppColors.tide,
+                          color:
+                              _colors[(s['label'] ?? '').toString()] ??
+                              AppColors.tide,
                         ),
                       ),
                   ],
@@ -1272,8 +1457,12 @@ class _SentimentTimelineCard extends StatelessWidget {
               children: [
                 for (final s in segments)
                   Text(
-                    (s['t0'] ?? _mmss((s['t0_sec'] as num?)?.toInt() ?? 0)).toString(),
-                    style: AppText.caption11.copyWith(color: AppColors.schooner, fontSize: 10),
+                    (s['t0'] ?? _mmss((s['t0_sec'] as num?)?.toInt() ?? 0))
+                        .toString(),
+                    style: AppText.caption11.copyWith(
+                      color: AppColors.schooner,
+                      fontSize: 10,
+                    ),
                   ),
               ],
             ),
@@ -1289,12 +1478,17 @@ class _SentimentTimelineCard extends StatelessWidget {
                       Container(
                         width: 8,
                         height: 8,
-                        decoration: BoxDecoration(color: e.value, shape: BoxShape.circle),
+                        decoration: BoxDecoration(
+                          color: e.value,
+                          shape: BoxShape.circle,
+                        ),
                       ),
                       const SizedBox(width: AppSpacing.xxs),
                       Text(
                         e.key[0].toUpperCase() + e.key.substring(1),
-                        style: AppText.caption11.copyWith(color: AppColors.schooner),
+                        style: AppText.caption11.copyWith(
+                          color: AppColors.schooner,
+                        ),
                       ),
                     ],
                   ),
@@ -1302,7 +1496,10 @@ class _SentimentTimelineCard extends StatelessWidget {
             ),
             if (caption.isNotEmpty) ...[
               const AppGap.xs(),
-              Text(caption, style: AppText.caption11.copyWith(color: AppColors.schooner)),
+              Text(
+                caption,
+                style: AppText.caption11.copyWith(color: AppColors.schooner),
+              ),
             ],
           ],
         ],
@@ -1334,7 +1531,10 @@ class _EnglishToggleBanner extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: AppSpacing.sm, vertical: AppSpacing.sm),
+      padding: const EdgeInsets.symmetric(
+        horizontal: AppSpacing.sm,
+        vertical: AppSpacing.sm,
+      ),
       decoration: BoxDecoration(
         color: AppColors.blueRibbon.withValues(alpha: 0.08),
         borderRadius: BorderRadius.circular(AppRadius.sm),
@@ -1353,7 +1553,8 @@ class _EnglishToggleBanner extends StatelessWidget {
           ),
           if (translating)
             const SizedBox(
-              width: 14, height: 14,
+              width: 14,
+              height: 14,
               child: CircularProgressIndicator(strokeWidth: 2),
             )
           else
@@ -1398,7 +1599,9 @@ class _TranscriptTab extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final langName = language != null ? (_langNames[language] ?? language!) : null;
+    final langName = language != null
+        ? (_langNames[language] ?? language!)
+        : null;
     final isNonEnglish = language != null && language != 'en';
 
     final filtered = query.isEmpty
@@ -1408,7 +1611,12 @@ class _TranscriptTab extends StatelessWidget {
     return Column(
       children: [
         Padding(
-          padding: const EdgeInsets.fromLTRB(AppSpacing.md, AppSpacing.sm, AppSpacing.md, AppSpacing.xs),
+          padding: const EdgeInsets.fromLTRB(
+            AppSpacing.md,
+            AppSpacing.sm,
+            AppSpacing.md,
+            AppSpacing.xs,
+          ),
           child: Wrap(
             spacing: 8,
             runSpacing: 8,
@@ -1418,7 +1626,9 @@ class _TranscriptTab extends StatelessWidget {
               if (calledAt != null)
                 _Chip(DateFormat('h:mm a').format(calledAt!)),
               if (duration != null)
-                _Chip('${duration!.inMinutes}m ${(duration!.inSeconds.remainder(60)).toString().padLeft(2, '0')}s'),
+                _Chip(
+                  '${duration!.inMinutes}m ${(duration!.inSeconds.remainder(60)).toString().padLeft(2, '0')}s',
+                ),
               if (langName != null) _Chip(langName),
             ],
           ),
@@ -1435,7 +1645,12 @@ class _TranscriptTab extends StatelessWidget {
             ),
           ),
         Padding(
-          padding: const EdgeInsets.fromLTRB(AppSpacing.md, AppSpacing.sm, AppSpacing.md, AppSpacing.xxs),
+          padding: const EdgeInsets.fromLTRB(
+            AppSpacing.md,
+            AppSpacing.sm,
+            AppSpacing.md,
+            AppSpacing.xxs,
+          ),
           child: TextField(
             controller: searchController,
             decoration: InputDecoration(
@@ -1455,12 +1670,19 @@ class _TranscriptTab extends StatelessWidget {
           child: filtered.isEmpty
               ? Center(
                   child: Text(
-                    query.isEmpty ? 'No transcript available.' : 'No matches found.',
+                    query.isEmpty
+                        ? 'No transcript available.'
+                        : 'No matches found.',
                     style: AppText.body14.copyWith(color: AppColors.schooner),
                   ),
                 )
               : ListView.builder(
-                  padding: const EdgeInsets.fromLTRB(AppSpacing.md, AppSpacing.xs, AppSpacing.md, AppSpacing.xl),
+                  padding: const EdgeInsets.fromLTRB(
+                    AppSpacing.md,
+                    AppSpacing.xs,
+                    AppSpacing.md,
+                    AppSpacing.xl,
+                  ),
                   itemCount: filtered.length,
                   itemBuilder: (context, i) => Padding(
                     padding: const EdgeInsets.only(bottom: AppSpacing.sm),
@@ -1485,13 +1707,19 @@ class _Chip extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: AppSpacing.sm, vertical: AppSpacing.xxs),
+      padding: const EdgeInsets.symmetric(
+        horizontal: AppSpacing.sm,
+        vertical: AppSpacing.xxs,
+      ),
       decoration: BoxDecoration(
         color: AppColors.pampas,
         borderRadius: BorderRadius.circular(20),
         border: Border.all(color: AppColors.westar),
       ),
-      child: Text(label, style: AppText.caption11.copyWith(fontWeight: FontWeight.w600)),
+      child: Text(
+        label,
+        style: AppText.caption11.copyWith(fontWeight: FontWeight.w600),
+      ),
     );
   }
 }
@@ -1516,24 +1744,44 @@ class _TranscriptBubble extends StatelessWidget {
 
     final labelRow = Row(
       mainAxisSize: MainAxisSize.min,
-      mainAxisAlignment: isAgent ? MainAxisAlignment.end : MainAxisAlignment.start,
+      mainAxisAlignment: isAgent
+          ? MainAxisAlignment.end
+          : MainAxisAlignment.start,
       children: [
         if (turn.timestamp != null && isAgent) ...[
-          Text(turn.timestamp!, style: AppText.caption11.copyWith(color: AppColors.schooner, fontSize: 10)),
+          Text(
+            turn.timestamp!,
+            style: AppText.caption11.copyWith(
+              color: AppColors.schooner,
+              fontSize: 10,
+            ),
+          ),
           const SizedBox(width: AppSpacing.xs),
         ],
-        Text(speakerLabel, style: AppText.caption11.copyWith(
-          color: AppColors.schooner, fontWeight: FontWeight.w700,
-        )),
+        Text(
+          speakerLabel,
+          style: AppText.caption11.copyWith(
+            color: AppColors.schooner,
+            fontWeight: FontWeight.w700,
+          ),
+        ),
         if (turn.timestamp != null && !isAgent) ...[
           const SizedBox(width: AppSpacing.xs),
-          Text(turn.timestamp!, style: AppText.caption11.copyWith(color: AppColors.schooner, fontSize: 10)),
+          Text(
+            turn.timestamp!,
+            style: AppText.caption11.copyWith(
+              color: AppColors.schooner,
+              fontSize: 10,
+            ),
+          ),
         ],
       ],
     );
 
     return Column(
-      crossAxisAlignment: isAgent ? CrossAxisAlignment.end : CrossAxisAlignment.start,
+      crossAxisAlignment: isAgent
+          ? CrossAxisAlignment.end
+          : CrossAxisAlignment.start,
       children: [
         labelRow,
         const SizedBox(height: 2),
@@ -1543,7 +1791,9 @@ class _TranscriptBubble extends StatelessWidget {
             padding: const EdgeInsets.all(AppSpacing.sm),
             constraints: const BoxConstraints(maxWidth: 300),
             decoration: BoxDecoration(
-              color: isAgent ? AppColors.blueRibbon.withValues(alpha: 0.08) : AppColors.white,
+              color: isAgent
+                  ? AppColors.blueRibbon.withValues(alpha: 0.08)
+                  : AppColors.white,
               borderRadius: BorderRadius.circular(AppRadius.md),
               border: isAgent ? null : Border.all(color: AppColors.westar),
             ),
@@ -1583,10 +1833,12 @@ class _TranscriptBubble extends StatelessWidget {
       if (r[0] > cursor) {
         spans.add(TextSpan(text: text.substring(cursor, r[0])));
       }
-      spans.add(TextSpan(
-        text: text.substring(r[0], r[1]),
-        style: const TextStyle(backgroundColor: AppColors.warningBorder),
-      ));
+      spans.add(
+        TextSpan(
+          text: text.substring(r[0], r[1]),
+          style: const TextStyle(backgroundColor: AppColors.warningBorder),
+        ),
+      );
       cursor = r[1];
     }
     if (cursor < text.length) {
@@ -1594,8 +1846,10 @@ class _TranscriptBubble extends StatelessWidget {
     }
 
     return RichText(
-      text: TextSpan(style: AppText.body14.copyWith(color: AppColors.zeus), children: spans),
+      text: TextSpan(
+        style: AppText.body14.copyWith(color: AppColors.zeus),
+        children: spans,
+      ),
     );
   }
 }
-

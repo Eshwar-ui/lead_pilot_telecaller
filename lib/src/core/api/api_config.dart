@@ -7,6 +7,8 @@
 ///   3. Provide a concrete [ApiClient] implementation (see `api_client.dart`).
 library;
 
+import 'package:flutter/foundation.dart' show kReleaseMode;
+
 /// A named backend target (dev / staging / prod).
 class ApiEnvironment {
   const ApiEnvironment({required this.name, required this.baseUrl});
@@ -54,8 +56,12 @@ class ApiConfig {
   /// falling back to mock data only if the backend is unreachable.
   static const bool useMockData = false;
 
-  /// The active backend target.
-  static const ApiEnvironment environment = ApiEnvironment.dev;
+  /// The active backend target. Release builds (what Play Store ships) always
+  /// point at the deployed Render backend; debug/profile builds default to
+  /// the local dev server (see [ApiEnvironment.dev] for setup notes).
+  static const ApiEnvironment environment = kReleaseMode
+      ? ApiEnvironment.prod
+      : ApiEnvironment.dev;
 
   static String get baseUrl => environment.baseUrl;
 

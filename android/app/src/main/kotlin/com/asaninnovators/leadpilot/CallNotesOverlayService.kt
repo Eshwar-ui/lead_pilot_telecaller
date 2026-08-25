@@ -1,4 +1,4 @@
-package com.example.lead_pilot_telecaller
+package com.asaninnovators.leadpilot
 
 import android.Manifest
 import android.app.Notification
@@ -668,7 +668,7 @@ class CallNotesOverlayService : Service() {
     // ── Constants ─────────────────────────────────────────────────────────────
 
     companion object {
-        const val ACTION_STOP = "com.example.lead_pilot_telecaller.STOP_CALL_NOTES_OVERLAY"
+        const val ACTION_STOP = "com.asaninnovators.leadpilot.STOP_CALL_NOTES_OVERLAY"
         const val EXTRA_LEAD_ID = "leadId"
         const val EXTRA_LEAD_NAME = "leadName"
         const val EXTRA_PHONE_NUMBER = "phoneNumber"

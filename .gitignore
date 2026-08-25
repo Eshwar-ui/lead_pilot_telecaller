@@ -7,6 +7,13 @@
 
 # Firebase service-account credentials — never commit, these are secrets.
 *firebase-adminsdk*.json
+
+# Release signing — the keystore and its passwords can never be committed;
+# losing them means the app can never be updated again under this identity.
+secrets/
+*.keystore
+*.jks
+android/key.properties
 .atom/
 .build/
 .buildlog/

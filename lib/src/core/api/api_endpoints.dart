@@ -99,4 +99,9 @@ class ApiEndpoints {
   // GET /api/calls/{call_id} catch-all.
   static const String callLogSync = '/api/call-log/sync';
   static const String callLog = '/api/call-log';
+
+  // Call-recording capture telemetry (found/not-found/permission-denied/etc,
+  // tagged with device manufacturer/model/OS version) — fire-and-forget from
+  // call_capture.dart, feeds the device/OEM failure-rate breakdown.
+  static const String captureAttempt = '/api/telemetry/capture-attempt';
 }

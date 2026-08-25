@@ -6,6 +6,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../models/call_recording.dart';
 import '../models/lead.dart';
 import '../services/call_recording_service.dart';
+import '../services/capture_telemetry_service.dart';
 import '../services/local_call_store.dart';
 import '../services/local_transcript_store.dart';
 import '../services/local_upload_ledger.dart';
@@ -109,6 +110,15 @@ final transcriptionServiceProvider = Provider<TranscriptionService>(
       TranscriptionService(getToken: () => ref.read(sessionProvider).token),
 );
 
+/// Fire-and-forget capture-attempt telemetry (see class doc) — overridable in
+/// tests so `captureLatest`'s reporting can be verified without a real
+/// backend/device.
+final captureTelemetryServiceProvider = Provider<CaptureTelemetryService>(
+  (ref) => CaptureTelemetryService(
+    getToken: () => ref.read(sessionProvider).token,
+  ),
+);
+
 /// Drives capturing the dialer's recording and turning it into a transcript,
 /// keyed by lead id (mirrors [CallNotesController]'s `Notifier<Map<...>>`).
 final callCaptureProvider =
@@ -189,6 +199,7 @@ class CallCaptureController extends Notifier<Map<String, CallCaptureState>> {
             message: 'Call recording capture is available on Android only.',
           ),
         );
+        unawaited(_reportCaptureTelemetry('unsupported'));
         return;
       case StoragePermissionResult.denied:
         _set(
@@ -198,6 +209,7 @@ class CallCaptureController extends Notifier<Map<String, CallCaptureState>> {
             message: 'Storage access is needed to read the call recording.',
           ),
         );
+        unawaited(_reportCaptureTelemetry('permission_denied'));
         return;
       case StoragePermissionResult.permanentlyDenied:
         _set(
@@ -208,6 +220,7 @@ class CallCaptureController extends Notifier<Map<String, CallCaptureState>> {
                 'Enable "All files access" in Settings to read recordings.',
           ),
         );
+        unawaited(_reportCaptureTelemetry('permission_blocked'));
         return;
       case StoragePermissionResult.granted:
         break;
@@ -237,12 +250,14 @@ class CallCaptureController extends Notifier<Map<String, CallCaptureState>> {
                 'dialer?',
           ),
         );
+        unawaited(_reportCaptureTelemetry('not_found'));
         return;
       }
       _set(
         leadId,
         existing.copyWith(status: CaptureStatus.found, recording: recording),
       );
+      unawaited(_reportCaptureTelemetry('found'));
       // A recording exists → a real call happened. Log it to My Calls now (real
       // evidence, unlike merely opening the dialer). It later merges with the
       // transcribed backend entry for the same call once the lead is enriched.
@@ -271,12 +286,19 @@ class CallCaptureController extends Notifier<Map<String, CallCaptureState>> {
         leadId,
         existing.copyWith(status: CaptureStatus.error, message: '$e'),
       );
+      unawaited(_reportCaptureTelemetry('error'));
     }
   }
 
   /// Opens OS settings so the user can grant a blocked permission.
   Future<void> openPermissionSettings() =>
       ref.read(callRecordingServiceProvider).openSettings();
+
+  /// Fire-and-forget capture-attempt telemetry — see
+  /// [CaptureTelemetryService] doc for why this exists and its fail-soft
+  /// contract. Never awaited by callers; never throws.
+  Future<void> _reportCaptureTelemetry(String outcome) =>
+      ref.read(captureTelemetryServiceProvider).report(outcome);
 
   static String _stageLabel(String stage) => switch (stage) {
     'upload' => 'Uploading recording…',

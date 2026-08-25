@@ -36,10 +36,7 @@
     <application
         android:label="Telecaller"
         android:name="${applicationName}"
-        android:icon="@mipmap/ic_launcher"
-        android:usesCleartextTraffic="true"><!-- DEV ONLY: allows http:// to the
-        local backend during the pilot. Remove this and serve the backend over
-        HTTPS before production. -->
+        android:icon="@mipmap/ic_launcher">
         <activity
             android:name=".MainActivity"
             android:exported="true"

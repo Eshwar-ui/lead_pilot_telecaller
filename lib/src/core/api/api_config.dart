@@ -13,27 +13,40 @@ import 'package:flutter/foundation.dart' show kReleaseMode;
 class ApiEnvironment {
   const ApiEnvironment({required this.name, required this.baseUrl});
 
+  /// Whether `--dart-define=API_BASE_URL=...` was passed. `bool.hasEnvironment`
+  /// is const-evaluable where `String.isNotEmpty` is not, so this is what lets
+  /// the dev URL stay a compile-time constant while remaining overridable.
+  static const bool _hasBaseUrlOverride = bool.hasEnvironment('API_BASE_URL');
+
   final String name;
   final String baseUrl;
 
-  // `dev` points at the local FastAPI "AI layer" backend (voicesummary-main),
-  // which serves /api/inbox, /api/leads, /api/memory, /api/calls/* on port 8000.
-  //   * Physical device (the Xiaomi) over USB: use 127.0.0.1 + `adb reverse
-  //     tcp:8000 tcp:8000` (re-run after every USB reconnect/adb restart).
-  //     This is the current setting — the "Nilay" Wi-Fi the phone and this
-  //     Mac both connect to has AP/client isolation enabled (confirmed via
-  //     `adb shell ping <mac-ip>` -> "Destination Host Unreachable" both
-  //     directions), so the phone can't reach the Mac's LAN IP over Wi-Fi at
-  //     all — that's the "network error" the telecaller app was hitting.
-  //     If AP isolation ever gets disabled on that router, the LAN-IP form
-  //     (http://<mac-en0-ip>:8000, check with `ipconfig getifaddr en0`) works
-  //     without needing USB/adb reverse.
-  //   * Android emulator instead: use http://10.0.2.2:8000 (host loopback).
-  //   * Run the backend with:
+  // `dev` points at the local FastAPI backend (leadpilot-backend), which serves
+  // /api/inbox, /api/leads, /api/memory, /api/calls/* on port 8000.
+  //
+  // Pass the address per-machine instead of editing this file:
+  //     flutter run --dart-define=API_BASE_URL=http://192.168.1.50:8000
+  // The default below is a LAN address and is therefore DHCP-dependent — check
+  // yours with `ipconfig getifaddr en0` and use the override when it differs.
+  //
+  //   * Physical device over Wi-Fi: use the Mac's LAN IP. Verified working on
+  //     2026-08-31 (phone 192.168.31.54 -> Mac 192.168.31.154: ping 0% loss,
+  //     and a raw `nc` GET /health from the device returned 200). Requires the
+  //     backend bound to all interfaces, not just loopback:
   //       uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+  //   * `adb reverse tcp:8000 tcp:8000` + 127.0.0.1 was the previous setting,
+  //     from a period when the "Nilay" Wi-Fi had AP/client isolation. Do NOT
+  //     rely on it while adb is connected over Wi-Fi (`adb connect`): the
+  //     reverse registers and shows in `adb reverse --list`, but does not
+  //     actually forward — measured on 2026-08-31, loopback GETs from the
+  //     device returned nothing while the LAN IP returned 200. Over a USB
+  //     cable it does work, and must be re-run after every reconnect.
+  //   * Android emulator instead: use http://10.0.2.2:8000 (host loopback).
   static const dev = ApiEnvironment(
     name: 'dev',
-    baseUrl: 'http://127.0.0.1:8000',
+    baseUrl: _hasBaseUrlOverride
+        ? String.fromEnvironment('API_BASE_URL')
+        : 'http://192.168.31.154:8000',
   );
   static const staging = ApiEnvironment(
     name: 'staging',

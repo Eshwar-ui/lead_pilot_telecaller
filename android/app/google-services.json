@@ -7,6 +7,25 @@
   "client": [
     {
       "client_info": {
+        "mobilesdk_app_id": "1:485775514266:android:090fba577ee93368369d23",
+        "android_client_info": {
+          "package_name": "app.asaninnovators.leadpilot"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAcoAAXFtxLNAGdmOJ6NIANN9o1yszkf5Q"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    },
+    {
+      "client_info": {
         "mobilesdk_app_id": "1:485775514266:android:3d21f40a7df63472369d23",
         "android_client_info": {
           "package_name": "com.asaninnovators.leadpilot"
@@ -14,9 +33,34 @@
       },
       "oauth_client": [],
       "api_key": [
-        { "current_key": "AIzaSyAcoAAXFtxLNAGdmOJ6NIANN9o1yszkf5Q" }
+        {
+          "current_key": "AIzaSyAcoAAXFtxLNAGdmOJ6NIANN9o1yszkf5Q"
+        }
       ],
-      "services": { "appinvite_service": { "other_platform_oauth_client": [] } }
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:485775514266:android:1a5053d672a8ad34369d23",
+        "android_client_info": {
+          "package_name": "com.example.lead_pilot_telecaller"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAcoAAXFtxLNAGdmOJ6NIANN9o1yszkf5Q"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
     }
   ],
   "configuration_version": "1"

@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -17,7 +18,8 @@ import '../models/lead.dart';
 /// from the call_id (the dataset has no phone field). In this app a [Lead.id]
 /// IS that contact_key, so detail / memory lookups round-trip cleanly.
 class LeadRepository {
-  const LeadRepository(this._client, {String? Function()? getToken}) : _getToken = getToken;
+  const LeadRepository(this._client, {String? Function()? getToken})
+    : _getToken = getToken;
 
   final ApiClient _client;
 
@@ -50,7 +52,9 @@ class LeadRepository {
   Future<InboxHeader> fetchInboxHeader() async {
     final body = await _client.get(ApiEndpoints.inbox);
     final header = (body is Map ? body['header'] : null);
-    return InboxHeader.fromJson(header is Map<String, dynamic> ? header : const {});
+    return InboxHeader.fromJson(
+      header is Map<String, dynamic> ? header : const {},
+    );
   }
 
   // ── Lead detail (card + memory bubble + call history) ───────────────────
@@ -68,7 +72,9 @@ class LeadRepository {
   /// `pipeline_stage`, so the caller can read back a stage moved on the web
   /// dashboard / another device. Separate method so the plain [leadDetail]
   /// callers stay untouched.
-  Future<({Lead lead, String? stage})> leadDetailWithStage(String contactKey) async {
+  Future<({Lead lead, String? stage})> leadDetailWithStage(
+    String contactKey,
+  ) async {
     final body = await _client.get(ApiEndpoints.leadDetail(contactKey));
     if (body is! Map<String, dynamic>) {
       throw ApiException('Unexpected lead-detail payload for $contactKey');
@@ -90,12 +96,16 @@ class LeadRepository {
       duplicate: map['duplicate'] == true,
       contactKey: map['contact_key'] as String?,
       name: map['name'] as String?,
+      assignedToName: map['assigned_to_name'] as String?,
     );
   }
 
   /// `POST /api/leads` (Save Lead). Returns the created/existing contact_key.
   Future<String> createLead(OutboundLeadDraft draft) async {
-    final body = await _client.post(ApiEndpoints.createLead, body: draft.toJson());
+    final body = await _client.post(
+      ApiEndpoints.createLead,
+      body: draft.toJson(),
+    );
     final map = body is Map<String, dynamic> ? body : const <String, dynamic>{};
     return (map['contact_key'] ?? '').toString();
   }
@@ -184,7 +194,10 @@ class LeadRepository {
   /// key points/next steps, Score breakdown notes/evidence quotes) to
   /// [target]. Index-aligned with [texts]; the backend fails open (returns
   /// originals) on any translation error, so this never throws for that case.
-  Future<List<String>> translateTexts(List<String> texts, {String target = 'en'}) async {
+  Future<List<String>> translateTexts(
+    List<String> texts, {
+    String target = 'en',
+  }) async {
     if (texts.isEmpty) return const [];
     final body = await _client.post(
       ApiEndpoints.translateTexts,
@@ -230,7 +243,9 @@ class LeadRepository {
   /// AI Script/Checklist for this contact instead of waiting for the next
   /// call to invalidate the cached one.
   Future<Map<String, dynamic>> rebuildPreCallBrief(String contactKey) async {
-    final body = await _client.post(ApiEndpoints.rebuildPreCallBrief(contactKey));
+    final body = await _client.post(
+      ApiEndpoints.rebuildPreCallBrief(contactKey),
+    );
     return body is Map<String, dynamic> ? body : const {};
   }
 
@@ -244,9 +259,12 @@ class LeadRepository {
 
   /// Poll [processingStatus] until done or failed (or timeout). Used by the
   /// "Analysing call…" screen after an upload.
+  ///
+  /// [interval] trades request volume for how quickly the UI notices the
+  /// pipeline finished — 1.5s keeps that lag small without polling too hard.
   Future<ProcessingStatus> awaitProcessing(
     String callId, {
-    Duration interval = const Duration(seconds: 3),
+    Duration interval = const Duration(milliseconds: 1500),
     Duration timeout = const Duration(minutes: 5),
     void Function(ProcessingStatus)? onTick,
   }) async {
@@ -254,11 +272,23 @@ class LeadRepository {
     while (true) {
       final status = await processingStatus(callId);
       onTick?.call(status);
-      if (status.failed || status.currentStage == 'done' || status.percent >= 100) {
+      if (status.failed ||
+          status.currentStage == 'done' ||
+          status.percent >= 100) {
         return status;
       }
       if (DateTime.now().isAfter(deadline)) {
-        throw ApiException('Processing timed out for call $callId');
+        // Tagged with a real TimeoutException (not just a null statusCode) so
+        // `ApiException.isTimeout` — and therefore an honest "still
+        // processing" message instead of a "network error" one — actually
+        // fires for this. The backend's analysis pipeline isn't cancelled
+        // when this client gives up waiting; it keeps running in its own
+        // background thread and will finish on its own (see
+        // `_process_uploaded_recording` in the backend).
+        throw ApiException(
+          'Processing timed out for call $callId',
+          cause: TimeoutException('awaitProcessing deadline exceeded'),
+        );
       }
       await Future<void>.delayed(interval);
     }
@@ -276,6 +306,12 @@ class LeadRepository {
     String? source,
     DateTime? callDate,
     String? contactKey,
+    // How this recording reached the app — the backend accepts "app_call",
+    // "auto_detected_realtime", "auto_detected_backfill", "manual_upload"
+    // (see _CAPTURE_SOURCES in calls.py) and stores anything else as null.
+    // Neither manual-upload screen sent this before, so those calls were
+    // indistinguishable from a legacy client in analytics.
+    String? captureSource = 'manual_upload',
   }) async {
     final uri = ApiConfig.uri(ApiEndpoints.uploadRecording);
     final request = http.MultipartRequest('POST', uri)
@@ -291,13 +327,21 @@ class LeadRepository {
     if (source != null) request.fields['source'] = source;
     // Send UTC (with offset) so the backend's tz-aware column stores the right
     // instant — a local DateTime's toIso8601String() carries no offset.
-    if (callDate != null) request.fields['call_date'] = callDate.toUtc().toIso8601String();
+    if (callDate != null)
+      request.fields['call_date'] = callDate.toUtc().toIso8601String();
     if (contactKey != null) request.fields['contact_key_override'] = contactKey;
+    if (captureSource != null) request.fields['capture_source'] = captureSource;
     final token = _getToken?.call();
     if (token != null) request.headers['Authorization'] = 'Bearer $token';
 
     try {
-      final streamed = await request.send().timeout(ApiConfig.timeout);
+      // ApiConfig.timeout (20s) is tuned for lightweight JSON calls, not a
+      // multipart body that can be close to 100MB — a recording upload on a
+      // slow mobile uplink could easily still be transmitting past 20s, well
+      // before it would have actually finished. Scale with file size instead
+      // of a flat cap shared with every other endpoint.
+      final uploadTimeout = await _uploadTimeoutFor(audio);
+      final streamed = await request.send().timeout(uploadTimeout);
       final response = await http.Response.fromStream(streamed);
       if (response.statusCode < 200 || response.statusCode >= 300) {
         throw ApiException(
@@ -305,10 +349,55 @@ class LeadRepository {
           statusCode: response.statusCode,
         );
       }
-      final map = jsonDecode(response.body);
-      return (map is Map && map['call_id'] != null) ? map['call_id'].toString() : '';
+      final dynamic map;
+      try {
+        map = jsonDecode(response.body);
+      } on FormatException catch (e) {
+        // A 2xx with an unparsable body (proxy/CDN error page, truncated
+        // response) — the request "succeeded" but there's nothing usable in
+        // it. Without this, a bare FormatException bypassed ApiException
+        // entirely and showed up as a raw Dart exception string.
+        throw ApiException(
+          'Upload succeeded but the response was malformed',
+          cause: e,
+        );
+      }
+      return (map is Map && map['call_id'] != null)
+          ? map['call_id'].toString()
+          : '';
+    } on ApiException {
+      rethrow;
+    } on TimeoutException catch (e) {
+      // Same shape as HttpApiClient._send's classification — without this,
+      // `ApiException.isTimeout` never fired for the upload's own transport
+      // timeout (only `awaitProcessing`'s polling deadline was wrapped this
+      // way), so a slow uplink on a large recording showed "Network error —
+      // check your connection" instead of an honest "still uploading" message.
+      throw ApiException('Upload timed out', cause: e);
     } on SocketException catch (e) {
       throw ApiException('Network error during upload', cause: e);
+    } on http.ClientException catch (e) {
+      // A mid-transfer drop (connection reset) — previously propagated as a
+      // raw, unclassified exception instead of an ApiException.
+      throw ApiException(
+        'Connection lost during upload: ${e.message}',
+        cause: e,
+      );
+    }
+  }
+
+  /// A generous, size-scaled upload timeout: a 30s floor (covers connection
+  /// setup + a small file) plus 10s per MB — comfortable even at a slow
+  /// ~100KB/s mobile uplink — capped at 10 minutes so a colossal/corrupt file
+  /// still fails eventually rather than hanging forever. Falls back to the
+  /// floor if the file's size can't be read for some reason.
+  static Future<Duration> _uploadTimeoutFor(File audio) async {
+    try {
+      final sizeMb = (await audio.length()) / (1024 * 1024);
+      final seconds = (30 + sizeMb * 10).clamp(30, 600).round();
+      return Duration(seconds: seconds);
+    } catch (_) {
+      return const Duration(seconds: 30);
     }
   }
 
@@ -356,7 +445,8 @@ class LeadRepository {
       // Real "last contacted" time: the most recent call, else when the lead
       // was created. Never default to now() — that made every never-called
       // lead show an identical, perpetually-fresh "just now" that never aged.
-      lastContact: _parseTs(j['last_call_at']) ??
+      lastContact:
+          _parseTs(j['last_call_at']) ??
           _parseTs(j['created_at']) ??
           DateTime.now(),
       totalCalls: _toInt(j['total_calls']),
@@ -395,7 +485,9 @@ class LeadRepository {
         for (final f in facts.whereType<Map<String, dynamic>>())
           MemoryInsight(
             text: (f['text'] ?? '').toString(),
-            callLabel: f['call_index'] != null ? 'Call #${f['call_index']}' : '',
+            callLabel: f['call_index'] != null
+                ? 'Call #${f['call_index']}'
+                : '',
             colorKey: (f['category'] ?? '').toString(),
           ),
     ];
@@ -437,6 +529,7 @@ class LeadRepository {
                 ? null
                 : c['telecaller_id'].toString(),
             sentiment: c['sentiment'] as String?,
+            captureSource: c['capture_source'] as String?,
           ),
     ];
 
@@ -489,11 +582,17 @@ class LeadRepository {
       history: history,
       propertyInterest: headline.isEmpty ? null : headline,
       nextStep: strategy,
+      addedByName: (j['created_by_name'] as String?)?.isNotEmpty == true
+          ? j['created_by_name'] as String
+          : null,
+      addedByRole: (j['created_by_role'] as String?)?.isNotEmpty == true
+          ? j['created_by_role'] as String
+          : null,
       pendingCommitments: memory['pending_commitments'] is List
           ? (memory['pending_commitments'] as List)
-              .map((e) => e.toString())
-              .where((e) => e.trim().isNotEmpty)
-              .toList()
+                .map((e) => e.toString())
+                .where((e) => e.trim().isNotEmpty)
+                .toList()
           : const [],
     );
   }
@@ -516,7 +615,8 @@ class LeadRepository {
     final ts = _parseTs(c['timestamp']);
     if (ts != null) {
       final d = ts.toLocal();
-      final date = '${d.day.toString().padLeft(2, '0')}/'
+      final date =
+          '${d.day.toString().padLeft(2, '0')}/'
           '${d.month.toString().padLeft(2, '0')}';
       return verdict != null ? '$date · $verdict' : 'Call $date';
     }
@@ -586,7 +686,9 @@ class InboxHeader {
   factory InboxHeader.fromJson(Map<String, dynamic> j) {
     final raw = j['buckets'];
     return InboxHeader(
-      totalLeads: j['total_leads'] is num ? (j['total_leads'] as num).round() : 0,
+      totalLeads: j['total_leads'] is num
+          ? (j['total_leads'] as num).round()
+          : 0,
       avgScore: j['avg_score'] is num ? (j['avg_score'] as num).round() : 0,
       buckets: {
         if (raw is Map)
@@ -598,19 +700,36 @@ class InboxHeader {
 }
 
 class DedupeResult {
-  const DedupeResult({required this.duplicate, this.contactKey, this.name});
+  const DedupeResult({
+    required this.duplicate,
+    this.contactKey,
+    this.name,
+    this.assignedToName,
+  });
 
   final bool duplicate;
   final String? contactKey;
   final String? name;
+
+  /// The telecaller the existing lead is assigned to, when the backend knows.
+  ///
+  /// Without it the warning reads "already in your leads" to someone who,
+  /// under per-telecaller scoping, cannot open it — a dead end. Naming the
+  /// owner turns it into "call Priya".
+  final String? assignedToName;
 }
 
 /// One diarized turn of a call transcript.
 class TranscriptTurn {
-  const TranscriptTurn({required this.speaker, required this.text, this.timestamp});
+  const TranscriptTurn({
+    required this.speaker,
+    required this.text,
+    this.timestamp,
+  });
 
   final String speaker; // AGENT | USER (telecaller vs lead)
   final String text;
+
   /// Elapsed time into the call as `MM:SS`, if the backend provided one.
   final String? timestamp;
 }
@@ -658,7 +777,11 @@ class TelecallerScore {
 }
 
 class ProcessingStage {
-  const ProcessingStage({required this.key, required this.label, required this.status});
+  const ProcessingStage({
+    required this.key,
+    required this.label,
+    required this.status,
+  });
 
   final String key; // upload | transcribe | analyse | done
   final String label;

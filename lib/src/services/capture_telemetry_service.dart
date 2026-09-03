@@ -39,12 +39,24 @@ class CaptureTelemetryService {
   /// `unsupported` / `error`, matching the backend's `CaptureOutcome` enum
   /// (and [CaptureStatus] in call_capture.dart).
   ///
+  /// [accessLevel] is how much storage access the app actually held —
+  /// `not_found` at `media_audio` and `not_found` at `all_files` are entirely
+  /// different failures, and without this the aggregate cannot separate them.
+  /// [details] carries the folder-probe snapshot from a hand-run Recording
+  /// Check (see RecordingDiagnosticsReport.toJson); [source] marks such runs
+  /// `diagnostic` so they stay out of the real-world failure rate.
+  ///
   /// Never throws. Not logged in → skipped outright (nothing to attribute
   /// the report to). Otherwise makes one attempt, then one retry on
   /// failure, then gives up silently — the backend endpoint is a cheap
   /// single insert, so a genuine outage is the only thing that would fail
   /// twice, and this must never loop or block the caller.
-  Future<void> report(String outcome) async {
+  Future<void> report(
+    String outcome, {
+    String? accessLevel,
+    String source = 'auto',
+    Map<String, dynamic>? details,
+  }) async {
     if (_getToken?.call() == null) return;
 
     final device = await _deviceDetails();
@@ -54,6 +66,12 @@ class CaptureTelemetryService {
         'device_manufacturer': device.manufacturer,
       if (device.model != null) 'device_model': device.model,
       if (device.osVersion != null) 'os_version': device.osVersion,
+      if (device.sdkInt != null) 'sdk_int': device.sdkInt,
+      if (accessLevel != null) 'access_level': accessLevel,
+      // Omitted when "auto" so an unchanged automatic report keeps exactly the
+      // body it had before this parameter existed.
+      if (source != 'auto') 'source': source,
+      if (details != null) 'details': details,
     };
 
     for (var attempt = 0; attempt < 2; attempt++) {
@@ -75,6 +93,10 @@ class CaptureTelemetryService {
         manufacturer: info.manufacturer,
         model: info.model,
         osVersion: 'Android ${info.version.release}',
+        // The API level, not just the marketing version: the storage rules
+        // this feature lives or dies by change at 29/30/33, and "Android 14"
+        // alone doesn't identify them.
+        sdkInt: info.version.sdkInt,
       );
     } catch (_) {
       // device_info_plus itself failing must not block the report — an
@@ -86,9 +108,15 @@ class CaptureTelemetryService {
 }
 
 class _DeviceDetails {
-  const _DeviceDetails({this.manufacturer, this.model, this.osVersion});
+  const _DeviceDetails({
+    this.manufacturer,
+    this.model,
+    this.osVersion,
+    this.sdkInt,
+  });
 
   final String? manufacturer;
   final String? model;
   final String? osVersion;
+  final int? sdkInt;
 }

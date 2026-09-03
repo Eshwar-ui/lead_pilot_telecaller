@@ -161,6 +161,8 @@ class Lead {
     this.propertyInterest,
     this.nextStep = '',
     this.pendingCommitments = const [],
+    this.addedByName,
+    this.addedByRole,
   });
 
   final String id;
@@ -189,6 +191,17 @@ class Lead {
   /// Promises the telecaller made that aren't fulfilled yet (memory bubble's
   /// `pending_commitments`) — shown as actionable "Next Steps" items.
   final List<String> pendingCommitments;
+
+  /// Who put this lead in the system, and in what capacity at the time.
+  ///
+  /// Usually the telecaller themselves, in which case the UI stays quiet. It
+  /// earns its space when a founder added the lead and assigned it out: the
+  /// person picking up the phone can see where an unfamiliar lead came from
+  /// instead of finding it unexplained in their list. Null for leads created
+  /// before provenance was tracked — the UI renders nothing rather than
+  /// inventing an origin.
+  final String? addedByName;
+  final String? addedByRole;
 
   /// Safe placeholder used while the inbox is loading or empty, so providers
   /// that must return a non-null [Lead] never throw on an empty list.
@@ -384,6 +397,7 @@ class CallRecord {
     this.callId,
     this.placedBy,
     this.sentiment,
+    this.captureSource,
   });
 
   final String title;
@@ -409,6 +423,10 @@ class CallRecord {
   /// threshold — see the "Positive Calls" stat on the inbox screen.
   final String? sentiment;
 
+  /// Backend `capture_source` — how this call's recording reached us. See
+  /// [CallLogEntry.captureSource].
+  final String? captureSource;
+
   factory CallRecord.fromJson(Map<String, dynamic> json) => CallRecord(
     title: json['title'] as String? ?? '',
     duration: Duration(
@@ -422,6 +440,7 @@ class CallRecord {
     callId: json['call_id'] as String?,
     placedBy: json['telecaller_id'] as String?,
     sentiment: json['sentiment'] as String?,
+    captureSource: json['capture_source'] as String?,
   );
 
   Map<String, dynamic> toJson() => {
@@ -433,6 +452,7 @@ class CallRecord {
     'call_id': callId,
     'telecaller_id': placedBy,
     'sentiment': sentiment,
+    'capture_source': captureSource,
   };
 }
 
@@ -562,6 +582,7 @@ class CallLogEntry {
     this.callId,
     this.deviceCallId,
     this.sentiment,
+    this.captureSource,
   });
 
   final String id;
@@ -593,6 +614,17 @@ class CallLogEntry {
   /// device-call-log/native entry, which never has backend analysis at all).
   final String? sentiment;
 
+  /// How this call's recording was captured — "app_call" when the telecaller
+  /// placed it from the app, "auto_detected_backfill"/"auto_detected_realtime"
+  /// when the app picked up a call made or taken outside it. Null for a call
+  /// with no uploaded recording (every native call-log entry, until one is).
+  final String? captureSource;
+
+  /// True for a call the app picked up on its own. Drives the "Auto" badge —
+  /// a call appearing in the log that the telecaller never started from here
+  /// should say so.
+  bool get isAutoDetected => captureSource?.startsWith('auto_detected') ?? false;
+
   CallLogEntry copyWith({
     Duration? duration,
     int? score,
@@ -605,6 +637,7 @@ class CallLogEntry {
     bool? isInbound,
     String? deviceCallId,
     String? sentiment,
+    String? captureSource,
   }) => CallLogEntry(
     id: id,
     leadName: leadName ?? this.leadName,
@@ -619,6 +652,7 @@ class CallLogEntry {
     callId: callId ?? this.callId,
     deviceCallId: deviceCallId ?? this.deviceCallId,
     sentiment: sentiment ?? this.sentiment,
+    captureSource: captureSource ?? this.captureSource,
   );
 
   factory CallLogEntry.fromJson(Map<String, dynamic> json) => CallLogEntry(
@@ -637,6 +671,7 @@ class CallLogEntry {
     callId: json['call_id'] as String?,
     deviceCallId: json['device_call_id'] as String?,
     sentiment: json['sentiment'] as String?,
+    captureSource: json['capture_source'] as String?,
   );
 
   Map<String, dynamic> toJson() => {
@@ -653,6 +688,7 @@ class CallLogEntry {
     'call_id': callId,
     'device_call_id': deviceCallId,
     'sentiment': sentiment,
+    'capture_source': captureSource,
   };
 }
 
@@ -666,6 +702,7 @@ class OutboundLeadDraft {
     this.source = '',
     this.hasDuplicate = false,
     this.dedupeContactKey,
+    this.dedupeOwnerName,
   });
 
   final String name;
@@ -679,6 +716,10 @@ class OutboundLeadDraft {
   /// on the duplicate-warning banner navigates to.
   final String? dedupeContactKey;
 
+  /// Telecaller who owns that existing lead, when known — shown in the banner
+  /// so a duplicate points at a person to talk to, not just a dead end.
+  final String? dedupeOwnerName;
+
   OutboundLeadDraft copyWith({
     String? name,
     String? phone,
@@ -686,6 +727,7 @@ class OutboundLeadDraft {
     String? source,
     bool? hasDuplicate,
     String? dedupeContactKey,
+    String? dedupeOwnerName,
 
     /// Resets [hasDuplicate]/[dedupeContactKey] regardless of the params
     /// above — needed since a plain `?? this.x` copyWith can't express
@@ -701,6 +743,9 @@ class OutboundLeadDraft {
       dedupeContactKey: clearDedupe
           ? null
           : (dedupeContactKey ?? this.dedupeContactKey),
+      dedupeOwnerName: clearDedupe
+          ? null
+          : (dedupeOwnerName ?? this.dedupeOwnerName),
     );
   }
 

@@ -52,6 +52,7 @@ dependencies:
   firebase_core: ^4.13.0
   firebase_messaging: ^16.5.0
   device_info_plus: ^11.5.0
+  flutter_svg: ^2.2.4
 
 dev_dependencies:
   flutter_test:

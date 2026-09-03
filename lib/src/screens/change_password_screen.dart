@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 import 'package:flutter_app_utilities/flutter_app_utilities.dart';
 
 import '../core/api/api_exception.dart';
+import '../routing/back_navigation.dart';
 import '../services/session_store.dart';
 import '../state/providers.dart';
 import '../theme/app_colors.dart';
@@ -105,7 +106,7 @@ class _ChangePasswordScreenState extends ConsumerState<ChangePasswordScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
+    final scaffold = Scaffold(
       backgroundColor: AppColors.springWood,
       appBar: widget.forced
           ? null
@@ -114,10 +115,7 @@ class _ChangePasswordScreenState extends ConsumerState<ChangePasswordScreen> {
               elevation: 0,
               // Explicit back button so this screen is always dismissable, even
               // if it was reached without a poppable stack (falls back to Home).
-              leading: BackButton(
-                onPressed: () =>
-                    context.canPop() ? context.pop() : context.go('/home'),
-              ),
+              leading: BackButton(onPressed: () => goBackOr(context, '/home')),
               title: Text('Change Password', style: AppText.display20),
             ),
       body: SafeArea(
@@ -190,5 +188,13 @@ class _ChangePasswordScreenState extends ConsumerState<ChangePasswordScreen> {
         ),
       ),
     );
+    // Forced (post-invite/reset) mode has no back affordance by design — the
+    // router's redirect in app_router.dart bounces straight back here anyway
+    // while mustResetPassword is set, so there's nothing to fall back to.
+    // Voluntary mode (reached from Profile) can end up as the stack root the
+    // same way Lead Detail can, so it needs the same fallback.
+    return widget.forced
+        ? scaffold
+        : BackOrFallback(fallback: '/home', child: scaffold);
   }
 }

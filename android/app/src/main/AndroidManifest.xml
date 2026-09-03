@@ -98,6 +98,17 @@
                 android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
                 android:value="call_notes_overlay" />
         </service>
+        <!-- Always-on (while enabled in Profile) detector for calls placed or
+             received outside the app, so a call to a lead's number is captured
+             and analysed the same way an app-placed call is. -->
+        <service
+            android:name=".CallDetectionService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="lead_call_detection" />
+        </service>
     </application>
     <!-- Required to query activities that can process text, see:
          https://developer.android.com/training/package-visibility and

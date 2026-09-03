@@ -1,4 +1,4 @@
-package com.asaninnovators.leadpilot
+package app.asaninnovators.leadpilot
 
 import android.Manifest
 import android.app.Notification
@@ -37,6 +37,7 @@ class CallNotesOverlayService : Service() {
     private lateinit var windowManager: WindowManager
     private var overlayView: View? = null
     private var layoutParams: WindowManager.LayoutParams? = null
+    private var postCallScreenLaunched = false
     private val mainHandler = Handler(Looper.getMainLooper())
 
     // ── Lead context ──────────────────────────────────────────────────────────
@@ -129,17 +130,29 @@ class CallNotesOverlayService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (intent?.action == ACTION_STOP) { stopSelf(); return START_NOT_STICKY }
 
-        leadId = intent?.getStringExtra(EXTRA_LEAD_ID).orEmpty()
-        leadName = intent?.getStringExtra(EXTRA_LEAD_NAME).orEmpty()
-        phoneNumber = intent?.getStringExtra(EXTRA_PHONE_NUMBER).orEmpty()
-        leadScore = intent?.getIntExtra(EXTRA_LEAD_SCORE, 0) ?: 0
-        temperature = intent?.getStringExtra(EXTRA_TEMPERATURE).orEmpty()
-        leadIntent = intent?.getStringExtra(EXTRA_INTENT).orEmpty()
-        scriptOpeningLine = intent?.getStringExtra(EXTRA_SCRIPT_OPENING).orEmpty()
-        memoryFacts = intent?.getStringArrayListExtra(EXTRA_MEMORY_FACTS) ?: emptyList()
-        lastCallTs = intent?.getStringExtra(EXTRA_LAST_CALL_TS).orEmpty()
-        lastCallScore = intent?.getIntExtra(EXTRA_LAST_CALL_SCORE, 0) ?: 0
-        lastCallSummary = intent?.getStringExtra(EXTRA_LAST_CALL_SUMMARY).orEmpty()
+        // START_STICKY redelivers with a null Intent when the OS restarts
+        // this service after the process was killed — with no saved state to
+        // restore (Android doesn't retain our custom extras across that),
+        // leadId/phoneNumber/etc. would all fall back to "" below and
+        // `showCollapsedBubble()` would still fire unconditionally,
+        // resurfacing a blank, non-functional bubble bound to no lead. Stop
+        // cleanly instead of showing something broken.
+        if (intent == null) {
+            stopSelf()
+            return START_NOT_STICKY
+        }
+
+        leadId = intent.getStringExtra(EXTRA_LEAD_ID).orEmpty()
+        leadName = intent.getStringExtra(EXTRA_LEAD_NAME).orEmpty()
+        phoneNumber = intent.getStringExtra(EXTRA_PHONE_NUMBER).orEmpty()
+        leadScore = intent.getIntExtra(EXTRA_LEAD_SCORE, 0)
+        temperature = intent.getStringExtra(EXTRA_TEMPERATURE).orEmpty()
+        leadIntent = intent.getStringExtra(EXTRA_INTENT).orEmpty()
+        scriptOpeningLine = intent.getStringExtra(EXTRA_SCRIPT_OPENING).orEmpty()
+        memoryFacts = intent.getStringArrayListExtra(EXTRA_MEMORY_FACTS) ?: emptyList()
+        lastCallTs = intent.getStringExtra(EXTRA_LAST_CALL_TS).orEmpty()
+        lastCallScore = intent.getIntExtra(EXTRA_LAST_CALL_SCORE, 0)
+        lastCallSummary = intent.getStringExtra(EXTRA_LAST_CALL_SUMMARY).orEmpty()
 
         // Retry in case the phone-state permission was granted after onCreate.
         registerPhoneListener()
@@ -619,6 +632,14 @@ class CallNotesOverlayService : Service() {
 
     private fun openPostCallScreen() {
         if (leadId.isBlank()) return
+        // A manual tap on the "Call ended" banner and its own 4s auto-navigate
+        // fallback (see showCallEndedBubble) both call this. stopSelf() from
+        // the tap doesn't destroy the service synchronously, so the delayed
+        // Handler callback can still fire in that window before overlayView is
+        // nulled — without this guard both paths fire the same deep link,
+        // double-triggering the "?new=1" auto-capture flow on the Dart side.
+        if (postCallScreenLaunched) return
+        postCallScreenLaunched = true
         startActivity(Intent(Intent.ACTION_VIEW).apply {
             // `?new=1` tells the router this is "just finished a call" so it
             // triggers auto-capture even on a cold start (Dart `extra` can't
@@ -668,7 +689,7 @@ class CallNotesOverlayService : Service() {
     // ── Constants ─────────────────────────────────────────────────────────────
 
     companion object {
-        const val ACTION_STOP = "com.asaninnovators.leadpilot.STOP_CALL_NOTES_OVERLAY"
+        const val ACTION_STOP = "app.asaninnovators.leadpilot.STOP_CALL_NOTES_OVERLAY"
         const val EXTRA_LEAD_ID = "leadId"
         const val EXTRA_LEAD_NAME = "leadName"
         const val EXTRA_PHONE_NUMBER = "phoneNumber"

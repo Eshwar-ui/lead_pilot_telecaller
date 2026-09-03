@@ -162,6 +162,7 @@ class HttpApiClient implements ApiClient {
     throw ApiException(
       '$method $path failed: $detail',
       statusCode: code,
+      detail: detail,
     );
   }
 }

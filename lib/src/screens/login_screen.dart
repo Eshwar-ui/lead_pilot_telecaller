@@ -29,6 +29,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
   String _email = '';
   String _password = '';
   bool _loading = false;
+  bool _obscurePassword = true;
   String? _error;
   _ErrorKind _errorKind = _ErrorKind.validation;
 
@@ -149,33 +150,18 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                                 image: true,
                                 child: Image.asset(
                                   'assets/images/asan_logo.png',
-                                  width: 92,
+                                  width: 116,
                                   height: 72,
                                   fit: BoxFit.contain,
                                 ),
                               ),
                               const SizedBox(width: 12),
-                              Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text(
-                                    'ASAN INNOVATORS',
-                                    style: AppText.label11.copyWith(
-                                      color: Colors.white.withValues(
-                                        alpha: 0.60,
-                                      ),
-                                      letterSpacing: 1.4,
-                                    ),
-                                  ),
-                                  const SizedBox(height: 3),
-                                  Text(
-                                    'Telecaller workspace',
-                                    style: AppText.display16.copyWith(
-                                      color: Colors.white,
-                                      fontSize: 19,
-                                    ),
-                                  ),
-                                ],
+                              Text(
+                                'Telecaller workspace',
+                                style: AppText.display16.copyWith(
+                                  color: Colors.white,
+                                  fontSize: 18,
+                                ),
                               ),
                             ],
                           ),
@@ -257,8 +243,23 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                             child: LpTextField(
                               value: _password,
                               onChanged: (v) => setState(() => _password = v),
-                              obscureText: true,
+                              obscureText: _obscurePassword,
                               enabled: !_loading,
+                              suffixIcon: IconButton(
+                                icon: Icon(
+                                  _obscurePassword
+                                      ? Icons.visibility_off_outlined
+                                      : Icons.visibility_outlined,
+                                  size: 20,
+                                  color: AppColors.schooner,
+                                ),
+                                tooltip: _obscurePassword
+                                    ? 'Show password'
+                                    : 'Hide password',
+                                onPressed: () => setState(
+                                  () => _obscurePassword = !_obscurePassword,
+                                ),
+                              ),
                             ),
                           ),
                           if (_error != null) ...[

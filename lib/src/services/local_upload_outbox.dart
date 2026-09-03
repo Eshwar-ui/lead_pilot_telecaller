@@ -15,6 +15,7 @@ class OutboxEntry {
     this.source,
     this.contactKey,
     this.callDateIso,
+    this.captureSource,
     this.attempts = 0,
     this.lastError,
   });
@@ -26,6 +27,12 @@ class OutboxEntry {
   final String? source;
   final String? contactKey;
   final String? callDateIso;
+
+  /// How the recording was captured ("app_call", "auto_detected_backfill", …)
+  /// — carried through the retry so a call detected outside the app is still
+  /// labelled that way when the upload finally lands.
+  final String? captureSource;
+
   final int attempts;
   final String? lastError;
 
@@ -37,6 +44,7 @@ class OutboxEntry {
         source: source,
         contactKey: contactKey,
         callDateIso: callDateIso,
+        captureSource: captureSource,
         attempts: attempts ?? this.attempts,
         lastError: lastError ?? this.lastError,
       );
@@ -49,6 +57,7 @@ class OutboxEntry {
         'source': source,
         'contactKey': contactKey,
         'callDateIso': callDateIso,
+        'captureSource': captureSource,
         'attempts': attempts,
         'lastError': lastError,
       };
@@ -61,6 +70,7 @@ class OutboxEntry {
         source: j['source'] as String?,
         contactKey: j['contactKey'] as String?,
         callDateIso: j['callDateIso'] as String?,
+        captureSource: j['captureSource'] as String?,
         attempts: j['attempts'] is num ? (j['attempts'] as num).toInt() : 0,
         lastError: j['lastError'] as String?,
       );

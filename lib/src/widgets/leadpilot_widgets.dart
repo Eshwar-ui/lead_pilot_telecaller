@@ -4,11 +4,15 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_app_utilities/flutter_app_utilities.dart'
     hide AppRadius, AppSpacing;
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../models/lead.dart';
+import '../services/session_store.dart';
+import '../state/providers.dart';
 import '../theme/app_colors.dart';
 import '../theme/app_spacing.dart';
 import '../theme/app_theme.dart';
+import 'organization_logo.dart';
 
 class LpScreen extends StatelessWidget {
   const LpScreen({
@@ -50,7 +54,7 @@ class LpScreen extends StatelessWidget {
   }
 }
 
-class LpTopBar extends StatelessWidget {
+class LpTopBar extends ConsumerWidget {
   const LpTopBar({
     super.key,
     required this.title,
@@ -65,7 +69,9 @@ class LpTopBar extends StatelessWidget {
   final VoidCallback? onBack;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    final org = ref.watch(orgProfileProvider).value;
+    final orgName = org?.name ?? ref.watch(sessionProvider).orgName ?? '';
     return Container(
       height: 75,
       padding: const EdgeInsets.fromLTRB(14, 8, 14, 8),
@@ -80,16 +86,7 @@ class LpTopBar extends StatelessWidget {
             onTap: onBack ?? () => Navigator.of(context).maybePop(),
           ),
           const AppGap(10, axis: Axis.horizontal),
-          Semantics(
-            label: 'Asan Innovators logo',
-            image: true,
-            child: Image.asset(
-              'assets/images/asan_logo.png',
-              width: 46,
-              height: 40,
-              fit: BoxFit.contain,
-            ),
-          ),
+          OrganizationLogo(orgName: orgName, url: org?.logoUrl, size: 42),
           const AppGap(10, axis: Axis.horizontal),
           Expanded(
             child: Column(
@@ -124,7 +121,7 @@ class LpTopBar extends StatelessWidget {
 /// Shared header for the four bottom-tab screens (Inbox, Calls, Follow-ups,
 /// Profile) so they all share one consistent "app bar". A white bar with a
 /// bottom border, a big title, an optional subtitle, and trailing actions.
-class LpTabHeader extends StatelessWidget {
+class LpTabHeader extends ConsumerWidget {
   const LpTabHeader({
     super.key,
     required this.title,
@@ -139,7 +136,9 @@ class LpTabHeader extends StatelessWidget {
   final List<Widget> actions;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    final org = ref.watch(orgProfileProvider).value;
+    final orgName = org?.name ?? ref.watch(sessionProvider).orgName ?? '';
     return Container(
       padding: const EdgeInsets.fromLTRB(20, 12, 16, 16),
       decoration: const BoxDecoration(
@@ -149,16 +148,7 @@ class LpTabHeader extends StatelessWidget {
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.center,
         children: [
-          Semantics(
-            label: 'Asan Innovators logo',
-            image: true,
-            child: Image.asset(
-              'assets/images/asan_logo.png',
-              width: 52,
-              height: 42,
-              fit: BoxFit.contain,
-            ),
-          ),
+          OrganizationLogo(orgName: orgName, url: org?.logoUrl, size: 46),
           const SizedBox(width: 12),
           Expanded(
             child: Column(
@@ -451,6 +441,34 @@ class LeadSummaryCard extends StatelessWidget {
                           ),
                         ),
                       ],
+                    ],
+                  ),
+                ],
+                // Only when SOMEONE ELSE added this lead. A telecaller
+                // reading "Added by <their own name>" on a lead they typed in
+                // themselves learns nothing; the line exists for the case
+                // where a founder added the lead and assigned it out, and an
+                // unfamiliar lead in the queue needs an explanation.
+                if (lead.addedByName != null &&
+                    lead.addedByRole != null &&
+                    lead.addedByRole != 'telecaller') ...[
+                  const AppGap.xs(),
+                  Row(
+                    children: [
+                      const Icon(
+                        Icons.person_add_alt_outlined,
+                        size: 12,
+                        color: AppColors.schooner,
+                      ),
+                      const AppGap(4, axis: Axis.horizontal),
+                      Expanded(
+                        child: Text(
+                          'Added by ${lead.addedByName}',
+                          style: AppText.caption11.copyWith(
+                            color: AppColors.schooner,
+                          ),
+                        ),
+                      ),
                     ],
                   ),
                 ],
@@ -871,6 +889,7 @@ class LpTextField extends StatelessWidget {
     this.obscureText = false,
     this.keyboardType,
     this.enabled = true,
+    this.suffixIcon,
   });
 
   final String value;
@@ -879,6 +898,7 @@ class LpTextField extends StatelessWidget {
   final int maxLines;
   final bool obscureText;
   final TextInputType? keyboardType;
+  final Widget? suffixIcon;
 
   /// False while a submit using this field's value is in flight, so the user
   /// can't edit (or double-submit) mid-request.
@@ -904,6 +924,7 @@ class LpTextField extends StatelessWidget {
           horizontal: 15,
           vertical: maxLines == 1 ? 15 : 12,
         ),
+        suffixIcon: suffixIcon,
         enabledBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(8),
           borderSide: BorderSide(

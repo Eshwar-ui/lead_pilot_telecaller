@@ -6,6 +6,7 @@ import 'package:go_router/go_router.dart';
 
 import '../models/attendance_record.dart';
 import '../models/lead.dart';
+import '../services/auto_capture_settings.dart';
 import '../services/local_call_store.dart';
 import '../services/session_store.dart';
 import '../services/user_profile_store.dart';
@@ -15,6 +16,7 @@ import '../theme/app_spacing.dart';
 import '../theme/app_theme.dart';
 import '../widgets/edit_profile_sheet.dart';
 import '../widgets/leadpilot_widgets.dart';
+import '../widgets/organization_logo.dart';
 
 class ProfileScreen extends ConsumerWidget {
   const ProfileScreen({super.key});
@@ -28,18 +30,21 @@ class ProfileScreen extends ConsumerWidget {
 
     final now = DateTime.now();
     final callsThisMonth = callLog
-        .where((e) => e.calledAt.year == now.year && e.calledAt.month == now.month)
+        .where(
+          (e) => e.calledAt.year == now.year && e.calledAt.month == now.month,
+        )
         .toList();
     final scored = callLog.where((e) => e.score > 0).toList();
     final avgScore = scored.isEmpty
         ? null
         : scored.map((e) => e.score).reduce((a, b) => a + b) ~/ scored.length;
-    final qualified =
-        leads.where((l) => l.temperature == LeadTemperature.hot).length;
-    final booked =
-        stages.values.where((s) => s == LeadStage.closedWon).length;
-    final convRate =
-        leads.isEmpty ? null : ((booked / leads.length) * 100).round();
+    final qualified = leads
+        .where((l) => l.temperature == LeadTemperature.hot)
+        .length;
+    final booked = stages.values.where((s) => s == LeadStage.closedWon).length;
+    final convRate = leads.isEmpty
+        ? null
+        : ((booked / leads.length) * 100).round();
 
     return Scaffold(
       backgroundColor: AppColors.springWood,
@@ -136,9 +141,30 @@ class ProfileScreen extends ConsumerWidget {
                         label: 'Call Recordings',
                         trailing: Text(
                           '90 days',
-                          style:
-                              AppText.body13.copyWith(color: AppColors.schooner),
+                          style: AppText.body13.copyWith(
+                            color: AppColors.schooner,
+                          ),
                         ),
+                      ),
+                      const Divider(height: 1, indent: 16, endIndent: 16),
+                      // The self-service answer to "my calls aren't being
+                      // recorded" — which folders this phone has, what access
+                      // the app holds, and the one thing to do about it.
+                      _SettingsRow(
+                        icon: Icons.troubleshoot_outlined,
+                        label: 'Recording Check',
+                        onTap: () => context.push('/recording-check'),
+                      ),
+                      const Divider(height: 1, indent: 16, endIndent: 16),
+                      // Off by default and never enabled implicitly: this
+                      // watches the phone's whole call history for lead
+                      // numbers, which is a bigger ask than capturing a call
+                      // the telecaller started from this app.
+                      _AutoCaptureRow(
+                        enabled: ref.watch(autoCaptureEnabledProvider),
+                        onChanged: (value) => ref
+                            .read(autoCaptureEnabledProvider.notifier)
+                            .setEnabled(value),
                       ),
                     ],
                   ),
@@ -221,6 +247,13 @@ class _UserCard extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final personInitials = profile.name
+        .trim()
+        .split(RegExp(r'\s+'))
+        .where((part) => part.isNotEmpty)
+        .take(2)
+        .map((part) => part[0].toUpperCase())
+        .join();
     return Container(
       margin: const EdgeInsets.fromLTRB(16, 12, 16, 0),
       padding: const EdgeInsets.all(18),
@@ -233,20 +266,18 @@ class _UserCard extends ConsumerWidget {
       child: Row(
         children: [
           Semantics(
-            label: 'Asan Innovators logo',
-            image: true,
+            label: '${profile.name} profile',
             child: Container(
               width: 56,
               height: 56,
-              padding: const EdgeInsets.all(4),
+              alignment: Alignment.center,
               decoration: BoxDecoration(
-                color: AppColors.white,
+                color: AppColors.governorBay,
                 borderRadius: BorderRadius.circular(AppRadius.lg),
-                border: Border.all(color: AppColors.westar),
               ),
-              child: Image.asset(
-                'assets/images/asan_logo.png',
-                fit: BoxFit.contain,
+              child: Text(
+                personInitials.isEmpty ? 'TC' : personInitials,
+                style: AppText.display16.copyWith(color: AppColors.white),
               ),
             ),
           ),
@@ -306,7 +337,7 @@ class _OrgCard extends ConsumerWidget {
       ),
       child: Row(
         children: [
-          _OrgLogo(url: org?.logoUrl),
+          OrganizationLogo(orgName: name, url: org?.logoUrl),
           const SizedBox(width: AppSpacing.sm),
           Expanded(
             child: Column(
@@ -329,44 +360,6 @@ class _OrgCard extends ConsumerWidget {
             ),
           ),
         ],
-      ),
-    );
-  }
-}
-
-class _OrgLogo extends StatelessWidget {
-  const _OrgLogo({required this.url});
-
-  final String? url;
-
-  @override
-  Widget build(BuildContext context) {
-    const size = 44.0;
-    if (url == null || url!.isEmpty) {
-      return ClipRRect(
-        borderRadius: BorderRadius.circular(AppRadius.md),
-        child: Image.asset(
-          'assets/images/asan_logo.png',
-          width: size,
-          height: size,
-          fit: BoxFit.cover,
-        ),
-      );
-    }
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(AppRadius.md),
-      child: Image.network(
-        url!,
-        width: size,
-        height: size,
-        fit: BoxFit.cover,
-        errorBuilder: (_, _, _) => Container(
-          width: size,
-          height: size,
-          color: AppColors.pampas,
-          child: const Icon(Icons.business_outlined,
-              size: 20, color: AppColors.schooner),
-        ),
       ),
     );
   }
@@ -403,8 +396,11 @@ class _AttendanceCard extends ConsumerWidget {
         children: [
           Row(
             children: [
-              const Icon(Icons.access_time_filled,
-                  size: 18, color: AppColors.blueRibbon),
+              const Icon(
+                Icons.access_time_filled,
+                size: 18,
+                color: AppColors.blueRibbon,
+              ),
               const SizedBox(width: AppSpacing.xs),
               Text('ATTENDANCE', style: AppText.label11),
             ],
@@ -468,8 +464,11 @@ class _ForgotCheckoutRow extends StatelessWidget {
       ),
       child: Row(
         children: [
-          const Icon(Icons.error_outline,
-              size: 16, color: AppColors.tahitiGold),
+          const Icon(
+            Icons.error_outline,
+            size: 16,
+            color: AppColors.tahitiGold,
+          ),
           const SizedBox(width: AppSpacing.xs),
           Expanded(
             child: Text(
@@ -609,11 +608,18 @@ class _AttendanceTimeRow extends StatelessWidget {
         Icon(icon, size: 16, color: AppColors.schooner),
         const SizedBox(width: AppSpacing.xs),
         Expanded(
-          child: Text(label, style: AppText.body14.copyWith(color: AppColors.zeus)),
+          child: Text(
+            label,
+            style: AppText.body14.copyWith(color: AppColors.zeus),
+          ),
         ),
         Text(
           value,
-          style: AppText.mono(size: 13, weight: FontWeight.w700, color: valueColor),
+          style: AppText.mono(
+            size: 13,
+            weight: FontWeight.w700,
+            color: valueColor,
+          ),
         ),
       ],
     );
@@ -693,6 +699,53 @@ class _SettingsRow extends StatelessWidget {
               const Icon(Icons.chevron_right, size: 16, color: AppColors.tide),
           ],
         ),
+      ),
+    );
+  }
+}
+
+/// Consent row for picking up calls placed or received outside the app. Spells
+/// out what gets watched — a telecaller should not have to discover from a
+/// call appearing on its own that their call history is being read.
+class _AutoCaptureRow extends StatelessWidget {
+  const _AutoCaptureRow({required this.enabled, required this.onChanged});
+
+  final bool enabled;
+  final ValueChanged<bool> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Icon(
+            Icons.phone_callback_outlined,
+            size: 18,
+            color: AppColors.schooner,
+          ),
+          const SizedBox(width: AppSpacing.sm),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Auto-detect lead calls',
+                  style: AppText.body14.copyWith(color: AppColors.zeus),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  'Calls to or from your leads’ numbers are captured and '
+                  'analysed even when you dial from your phone’s own dialer.',
+                  style: AppText.body13.copyWith(color: AppColors.schooner),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: AppSpacing.sm),
+          Switch(value: enabled, onChanged: onChanged),
+        ],
       ),
     );
   }

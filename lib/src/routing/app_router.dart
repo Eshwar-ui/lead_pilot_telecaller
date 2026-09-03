@@ -11,6 +11,7 @@ import '../screens/main_shell.dart';
 import '../screens/notifications_screen.dart';
 import '../screens/post_call_screen.dart';
 import '../screens/pre_call_screen.dart';
+import '../screens/recording_check_screen.dart';
 import '../services/session_store.dart';
 
 final appRouterProvider = Provider<GoRouter>((ref) {
@@ -48,6 +49,10 @@ final appRouterProvider = Provider<GoRouter>((ref) {
         builder: (context, state) => const ChangePasswordScreen(forced: false),
       ),
       GoRoute(path: '/home', builder: (context, state) => const MainShell()),
+      GoRoute(
+        path: '/recording-check',
+        builder: (context, state) => const RecordingCheckScreen(),
+      ),
       GoRoute(
         path: '/leads/:id',
         builder: (context, state) =>

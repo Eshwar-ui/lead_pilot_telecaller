@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:file_picker/file_picker.dart';
@@ -8,7 +9,11 @@ import 'package:flutter_app_utilities/flutter_app_utilities.dart';
 
 import '../core/api/api_exception.dart';
 import '../data/lead_repository.dart';
+import '../models/call_recording.dart';
 import '../models/lead.dart';
+import '../services/local_upload_ledger.dart';
+import '../services/local_upload_outbox.dart';
+import '../services/upload_error_copy.dart';
 import '../state/providers.dart';
 import '../theme/app_colors.dart';
 import '../theme/app_theme.dart';
@@ -54,6 +59,22 @@ class _AddOutboundLeadScreenState extends ConsumerState<AddOutboundLeadScreen> {
   DateTime _callDate = DateTime.now();
   String? _callId;
   late final TextEditingController _phoneController;
+
+  /// True when [_error] came from awaitProcessing giving up on a
+  /// slow-but-still-running analysis, rather than a real upload failure.
+  /// "Retry" in that case must resume polling the SAME [_callId] — mirrors
+  /// UploadRecordingSheet's identical fix; this screen had no equivalent, so
+  /// its only retry path re-uploaded (and re-billed) a call that may well
+  /// still finish on its own.
+  bool _errorIsTimeout = false;
+
+  /// True from the moment "upload a recording" is tapped until the OS file
+  /// picker returns. `_phase` only flips to `uploading` once the picker's
+  /// own `await` resolves — a fast double-tap in that gap could open two
+  /// concurrent picker/upload attempts, since both taps would still see
+  /// `_phase == idle`. This closes that gap with a guard set synchronously,
+  /// before the first `await`.
+  bool _picking = false;
 
   /// Once a recording has been uploaded, the backend has already resolved a
   /// contact for it from whatever name/phone were on screen at that moment.
@@ -111,8 +132,43 @@ class _AddOutboundLeadScreenState extends ConsumerState<AddOutboundLeadScreen> {
 
   // ── Recording upload → transcript ────────────────────────────────────────
 
+  /// Dropzone tap handler. After a successful upload the dropzone reads "Tap
+  /// to replace" — tapping it used to silently start a second upload (and a
+  /// second call_id/paid pipeline run) rather than actually replacing
+  /// anything, since the first call is never deleted. Confirm first so that's
+  /// a deliberate choice, not an accidental double-tap.
+  Future<void> _onDropzoneTap() async {
+    if (_phase == _UploadPhase.done) {
+      final confirmed = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('Upload a different recording?'),
+          content: const Text(
+            "This call's transcript and score are already saved. Uploading "
+            'another file creates a SEPARATE call — it does not replace this '
+            'one.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(ctx).pop(false),
+              child: const Text('Cancel'),
+            ),
+            TextButton(
+              onPressed: () => Navigator.of(ctx).pop(true),
+              child: const Text('Upload Another'),
+            ),
+          ],
+        ),
+      );
+      if (confirmed != true) return;
+    }
+    await _pickAndUpload();
+  }
+
   Future<void> _pickAndUpload() async {
-    if (_phase == _UploadPhase.uploading || _phase == _UploadPhase.processing) {
+    if (_phase == _UploadPhase.uploading ||
+        _phase == _UploadPhase.processing ||
+        _picking) {
       return; // already in flight
     }
 
@@ -132,25 +188,32 @@ class _AddOutboundLeadScreenState extends ConsumerState<AddOutboundLeadScreen> {
       return;
     }
 
-    final picked = await FilePicker.platform.pickFiles(
-      type: FileType.custom,
-      // 'opus' covers WhatsApp voice notes, which are shared as .opus files.
-      allowedExtensions: [
-        'mp3',
-        'wav',
-        'm4a',
-        'ogg',
-        'opus',
-        'aac',
-        'mpeg',
-        'mp4',
-      ],
-    );
-    final path = picked?.files.single.path;
+    _picking = true;
+    final PlatformFile? pickedFile;
+    try {
+      final picked = await FilePicker.platform.pickFiles(
+        type: FileType.custom,
+        // 'opus' covers WhatsApp voice notes, which are shared as .opus files.
+        allowedExtensions: [
+          'mp3',
+          'wav',
+          'm4a',
+          'ogg',
+          'opus',
+          'aac',
+          'mpeg',
+          'mp4',
+        ],
+      );
+      pickedFile = picked?.files.single;
+    } finally {
+      _picking = false;
+    }
+    final path = pickedFile?.path;
     if (path == null) return; // cancelled
 
     setState(() {
-      _fileName = picked!.files.single.name;
+      _fileName = pickedFile!.name;
       _phase = _UploadPhase.uploading;
       _stageLabel = 'Uploading…';
       _error = null;
@@ -161,13 +224,17 @@ class _AddOutboundLeadScreenState extends ConsumerState<AddOutboundLeadScreen> {
 
     final repo = ref.read(leadRepositoryProvider);
     final draft = ref.read(outboundLeadDraftProvider);
+    final phone = draft.phone.trim().isEmpty ? null : draft.phone.trim();
+    final source = draft.source.trim().isEmpty ? null : draft.source.trim();
+    String? callId;
     try {
-      final callId = await repo.uploadRecording(
+      callId = await repo.uploadRecording(
         File(path),
         name: draft.name.trim(),
-        phone: draft.phone.trim().isEmpty ? null : draft.phone.trim(),
-        source: draft.source.trim().isEmpty ? null : draft.source.trim(),
+        phone: phone,
+        source: source,
         callDate: _callDate,
+        captureSource: 'manual_upload',
       );
       if (!mounted) return;
       setState(() {
@@ -176,52 +243,109 @@ class _AddOutboundLeadScreenState extends ConsumerState<AddOutboundLeadScreen> {
         _stageLabel = 'Transcribing…';
       });
 
-      await repo.awaitProcessing(
-        callId,
-        timeout: const Duration(minutes: 10),
-        onTick: (s) {
-          if (!mounted) return;
-          setState(
-            () => _stageLabel = '${_stageWord(s.currentStage)}… ${s.percent}%',
-          );
-        },
+      // Recognized by a later auto-capture scan of this same file so it
+      // isn't silently re-uploaded (and re-billed) a second time.
+      unawaited(
+        ref
+            .read(localUploadLedgerProvider)
+            .remember(CallRecording.fromFile(File(path)), callId),
       );
+      unawaited(ref.read(localUploadOutboxProvider).remove(path));
 
-      final turns = (await repo.transcript(callId)).turns;
-      final analysis = await repo.leadAnalysis(callId);
-      if (!mounted) return;
-      setState(() {
-        _turns = turns;
-        _verdict = analysis['lead_verdict']?.toString();
-        _keyPoints = (analysis['key_points'] is List)
-            ? (analysis['key_points'] as List).map((e) => e.toString()).toList()
-            : const [];
-        _phase = _UploadPhase.done;
-        _stageLabel = 'Done';
-      });
+      await _awaitAndFinish(callId);
       // A call now exists for this contact — refresh the inbox.
+      ref.read(leadsProvider.notifier).refresh();
+    } catch (e) {
+      if (!mounted) return;
+      if (callId == null && phone != null) {
+        // The upload itself never reached the server — queue it for
+        // automatic retry. No local lead exists yet at this point (this
+        // screen creates one only when "Save Lead" is tapped), so the phone
+        // number is used as the outbox's tracking key — the backend resolves
+        // the same contact from it regardless, since no contactKey override
+        // is sent here either way. Skipped when there's no phone at all:
+        // without one, a retry couldn't resolve to any contact either.
+        unawaited(
+          ref
+              .read(localUploadOutboxProvider)
+              .enqueue(
+                OutboxEntry(
+                  leadId: phone,
+                  path: path,
+                  name: draft.name.trim(),
+                  phone: phone,
+                  source: source,
+                  callDateIso: _callDate.toIso8601String(),
+                  captureSource: 'manual_upload',
+                ),
+              ),
+        );
+      }
+      setState(() {
+        _phase = _UploadPhase.error;
+        _error = describeUploadError(e);
+        _errorIsTimeout = e is ApiException && e.isTimeout;
+      });
+    }
+  }
+
+  /// Polls processing status through to completion for an already-uploaded
+  /// [callId] and loads its transcript/analysis. Split out so a timed-out
+  /// wait (see [_errorIsTimeout]) can be retried by resuming the wait on the
+  /// same call instead of uploading the file all over again.
+  Future<void> _awaitAndFinish(String callId) async {
+    final repo = ref.read(leadRepositoryProvider);
+    await repo.awaitProcessing(
+      callId,
+      timeout: const Duration(minutes: 10),
+      onTick: (s) {
+        if (!mounted) return;
+        setState(
+          () => _stageLabel = '${_stageWord(s.currentStage)}… ${s.percent}%',
+        );
+      },
+    );
+
+    final turns = (await repo.transcript(callId)).turns;
+    final analysis = await repo.leadAnalysis(callId);
+    if (!mounted) return;
+    setState(() {
+      _turns = turns;
+      _verdict = analysis['lead_verdict']?.toString();
+      _keyPoints = (analysis['key_points'] is List)
+          ? (analysis['key_points'] as List).map((e) => e.toString()).toList()
+          : const [];
+      _phase = _UploadPhase.done;
+      _stageLabel = 'Done';
+    });
+  }
+
+  /// "Retry" after a still-processing timeout: resumes waiting on the same
+  /// [_callId] rather than re-uploading, since the original upload is likely
+  /// still being transcribed/analysed by the backend in the background.
+  Future<void> _resumeAwaiting() async {
+    final callId = _callId;
+    if (callId == null ||
+        _phase == _UploadPhase.uploading ||
+        _phase == _UploadPhase.processing) {
+      return;
+    }
+    setState(() {
+      _phase = _UploadPhase.processing;
+      _error = null;
+      _errorIsTimeout = false;
+    });
+    try {
+      await _awaitAndFinish(callId);
       ref.read(leadsProvider.notifier).refresh();
     } catch (e) {
       if (!mounted) return;
       setState(() {
         _phase = _UploadPhase.error;
-        _error = _describeUploadError(e);
+        _error = describeUploadError(e);
+        _errorIsTimeout = e is ApiException && e.isTimeout;
       });
     }
-  }
-
-  static String _describeUploadError(Object e) {
-    if (e is ApiException) {
-      if (e.isNetworkError) {
-        return 'Network error — check your connection and retry.';
-      }
-      if (e.isUnauthorized) return 'Session expired — please log in again.';
-      if (e.isServerError) {
-        return 'Server error while processing the recording. Please retry.';
-      }
-      return e.message;
-    }
-    return e.toString();
   }
 
   static String _stageWord(String key) {
@@ -259,6 +383,19 @@ class _AddOutboundLeadScreenState extends ConsumerState<AddOutboundLeadScreen> {
       final key = await ref.read(leadRepositoryProvider).createLead(draft);
       ref.read(leadsProvider.notifier).refresh();
       return key;
+    } on ApiException catch (e) {
+      if (e.isConflict) {
+        // The number is already a lead. The server's message names it and
+        // whoever owns it, so it's shown verbatim — far more useful than
+        // "could not save". The banner is refreshed too, so the telecaller
+        // gets the tap-through to that lead even when the debounced probe
+        // never ran (typed fast, or offline while typing).
+        unawaited(ref.read(outboundLeadDraftProvider.notifier).refreshDedupe());
+        _toast(e.detail ?? 'This number is already in your leads.');
+        return null;
+      }
+      _toast(e.detail ?? 'Could not save lead. Try again.');
+      return null;
     } catch (e) {
       _toast('Could not save lead: $e');
       return null;
@@ -426,7 +563,12 @@ class _AddOutboundLeadScreenState extends ConsumerState<AddOutboundLeadScreen> {
                                 style: AppText.body14.copyWith(
                                   color: AppColors.warningText,
                                 ),
-                                text: 'This number is already in your leads. ',
+                                text: draft.dedupeOwnerName == null
+                                    ? 'This number is already a lead, so it '
+                                          'can\'t be added again. '
+                                    : 'This number is already a lead assigned '
+                                          'to ${draft.dedupeOwnerName}, so it '
+                                          'can\'t be added again. ',
                                 children: [
                                   TextSpan(
                                     text: 'View existing lead ->',
@@ -471,7 +613,7 @@ class _AddOutboundLeadScreenState extends ConsumerState<AddOutboundLeadScreen> {
                     phase: _phase,
                     fileName: _fileName,
                     stageLabel: _stageLabel,
-                    onTap: busy ? null : _pickAndUpload,
+                    onTap: busy ? null : _onDropzoneTap,
                   ),
                 ),
                 const AppGap.md(),
@@ -522,7 +664,9 @@ class _AddOutboundLeadScreenState extends ConsumerState<AddOutboundLeadScreen> {
                   const AppGap.sm(),
                   _ErrorPanel(
                     message: _error ?? 'Upload failed',
-                    onRetry: _pickAndUpload,
+                    retryLabel: _errorIsTimeout ? 'Check again' : 'Retry',
+                    isTimeout: _errorIsTimeout,
+                    onRetry: _errorIsTimeout ? _resumeAwaiting : _pickAndUpload,
                   ),
                 ],
               ],
@@ -821,33 +965,50 @@ class _TranscriptResult extends StatelessWidget {
 }
 
 class _ErrorPanel extends StatelessWidget {
-  const _ErrorPanel({required this.message, required this.onRetry});
+  const _ErrorPanel({
+    required this.message,
+    required this.onRetry,
+    this.retryLabel = 'Retry',
+    this.isTimeout = false,
+  });
 
   final String message;
   final VoidCallback onRetry;
+  final String retryLabel;
+
+  /// True for "still processing, just slow" — styled as a heads-up rather
+  /// than a failure, since nothing actually broke. Mirrors
+  /// UploadRecordingSheet's _ErrorRow.
+  final bool isTimeout;
 
   @override
   Widget build(BuildContext context) {
+    final bg = isTimeout ? AppColors.warningSurface : AppColors.redSurface;
+    final border = isTimeout ? AppColors.warningBorder : AppColors.redBorder;
+    final fg = isTimeout ? AppColors.warningDark : AppColors.alizarin;
     return Container(
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: AppColors.redSurface,
+        color: bg,
         borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: AppColors.redBorder),
+        border: Border.all(color: border),
       ),
       child: Row(
         children: [
-          const Icon(Icons.error_outline, color: AppColors.alizarin),
+          Icon(
+            isTimeout ? Icons.hourglass_top : Icons.error_outline,
+            color: fg,
+          ),
           const AppGap.sm(axis: Axis.horizontal),
           Expanded(
             child: Text(
               message,
-              style: AppText.body14.copyWith(color: AppColors.alizarin),
+              style: AppText.body14.copyWith(color: fg),
               maxLines: 3,
               overflow: TextOverflow.ellipsis,
             ),
           ),
-          TextButton(onPressed: onRetry, child: const Text('Retry')),
+          TextButton(onPressed: onRetry, child: Text(retryLabel)),
         ],
       ),
     );

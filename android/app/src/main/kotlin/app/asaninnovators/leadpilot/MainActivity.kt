@@ -1,4 +1,4 @@
-package com.asaninnovators.leadpilot
+package app.asaninnovators.leadpilot
 
 import android.content.ActivityNotFoundException
 import android.content.ComponentName
@@ -10,6 +10,7 @@ import android.os.PowerManager
 import android.provider.Settings
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
+import io.flutter.plugin.common.EventChannel
 import io.flutter.plugin.common.MethodChannel
 
 class MainActivity : FlutterActivity() {
@@ -85,9 +86,52 @@ class MainActivity : FlutterActivity() {
                         result.success(showCallAppChooser(phoneNumber))
                     }
 
+                    "startCallDetection" -> {
+                        startCallDetection()
+                        result.success(true)
+                    }
+
+                    "stopCallDetection" -> {
+                        stopCallDetection()
+                        result.success(true)
+                    }
+
+                    "requestBackgroundPermissions" -> {
+                        requestBackgroundSurvivalPermissionsExplicitly()
+                        result.success(true)
+                    }
+
                     else -> result.notImplemented()
                 }
             }
+
+        EventChannel(
+            flutterEngine.dartExecutor.binaryMessenger,
+            CallDetectionEventBridge.CHANNEL,
+        ).setStreamHandler(CallDetectionEventBridge)
+    }
+
+    /**
+     * Starts the always-on listener for calls placed or received outside the
+     * app. Only ever called once the telecaller has switched on "Auto-detect
+     * lead calls" in Profile.
+     */
+    private fun startCallDetection() {
+        // Same OEM battery managers that kill the per-call overlay kill this
+        // one, and here it's worse: the service has to survive until whenever
+        // the next call happens, not just to the end of the current one.
+        requestBackgroundSurvivalPermissionsIfNeeded()
+
+        val serviceIntent = Intent(this, CallDetectionService::class.java)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            startForegroundService(serviceIntent)
+        } else {
+            startService(serviceIntent)
+        }
+    }
+
+    private fun stopCallDetection() {
+        stopService(Intent(this, CallDetectionService::class.java))
     }
 
     private fun startCallWithNotesBubble(
@@ -263,6 +307,57 @@ class MainActivity : FlutterActivity() {
         } catch (_: Exception) {
             // Screen renamed/removed on this MIUI/HyperOS version — no
             // universal successor to fall back to.
+        }
+    }
+
+    /**
+     * Explicit, user-initiated re-ask for both background-survival prompts —
+     * reached only from the Recording Check diagnostics screen, where the
+     * telecaller has deliberately gone looking for "why does the app keep
+     * getting killed mid-call" and asked to fix it. Deliberately bypasses
+     * [askedBatteryOptimizationExemption]/[askedMiuiAutostart]: those guards
+     * exist so the automatic in-call ask (see [requestBackgroundSurvivalPermissionsIfNeeded])
+     * can't stack a second prompt on top of itself or nag on every call — an
+     * explicit tap on a settings screen is a different context where showing
+     * the prompt again is exactly what was asked for, not nagging.
+     *
+     * Shows the battery-optimization dialog first if it isn't already
+     * granted; the MIUI autostart screen (Xiaomi/Redmi/POCO only) either
+     * after that, or immediately if battery optimization is already granted
+     * — never both at once, so they don't stack in a single tap.
+     */
+    private fun requestBackgroundSurvivalPermissionsExplicitly() {
+        val powerManager = getSystemService(Context.POWER_SERVICE) as? PowerManager
+        val batteryExemptionNeeded = Build.VERSION.SDK_INT >= Build.VERSION_CODES.M &&
+            powerManager != null && !powerManager.isIgnoringBatteryOptimizations(packageName)
+
+        if (batteryExemptionNeeded) {
+            try {
+                startActivity(
+                    Intent(
+                        Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS,
+                        Uri.parse("package:$packageName"),
+                    )
+                )
+                askedBatteryOptimizationExemption = true
+                return
+            } catch (_: ActivityNotFoundException) {
+                // Fall through to the MIUI screen below.
+            }
+        }
+        if (!isXiaomiDevice()) return
+        askedMiuiAutostart = true
+        try {
+            startActivity(
+                Intent().apply {
+                    component = ComponentName(
+                        "com.miui.securitycenter",
+                        "com.miui.permcenter.autostart.AutoStartManagementActivity",
+                    )
+                }
+            )
+        } catch (_: Exception) {
+            // Screen renamed/removed on this MIUI/HyperOS version.
         }
     }
 

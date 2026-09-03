@@ -187,6 +187,7 @@ class _FakeTranscriptionService extends TranscriptionService {
     String? source,
     String? contactKey,
     String? existingCallId,
+    String? captureSource,
     void Function(String callId)? onCallId,
     void Function(String stage, int percent)? onProgress,
   }) => _behavior(recording, leadId);

@@ -54,11 +54,11 @@ class _StartupScreen extends StatelessWidget {
                 label: 'Asan Innovators',
                 image: true,
                 child: Container(
-                  width: 132,
-                  height: 132,
-                  padding: const EdgeInsets.all(12),
+                  width: 190,
+                  height: 112,
+                  padding: const EdgeInsets.all(14),
                   decoration: BoxDecoration(
-                    color: AppColors.white,
+                    color: AppColors.zeus,
                     borderRadius: BorderRadius.circular(24),
                     border: Border.all(color: AppColors.westar),
                   ),

@@ -251,6 +251,7 @@ class TranscriptionService {
     String? source,
     String? contactKey,
     String? existingCallId,
+    String? captureSource,
     void Function(String callId)? onCallId,
     void Function(String stage, int percent)? onProgress,
   }) async {
@@ -267,6 +268,7 @@ class TranscriptionService {
           phone: phone,
           source: source,
           contactKey: contactKey,
+          captureSource: captureSource,
         );
     onCallId?.call(callId);
     onProgress?.call('upload', 20);
@@ -281,6 +283,7 @@ class TranscriptionService {
     String? phone,
     String? source,
     String? contactKey,
+    String? captureSource,
   }) async {
     final file = recording.file;
     if (!file.existsSync()) {
@@ -308,6 +311,12 @@ class TranscriptionService {
     // attaches to this lead even when phone is missing.
     request.fields['contact_key_override'] =
         (contactKey != null && contactKey.isNotEmpty) ? contactKey : leadId;
+    // How this recording reached us — lets the app badge a call that appeared
+    // on its own (detected from the phone's call log) rather than from the
+    // telecaller tapping Call here.
+    if (captureSource != null && captureSource.isNotEmpty) {
+      request.fields['capture_source'] = captureSource;
+    }
     if (token != null) request.headers['Authorization'] = 'Bearer $token';
 
     http.StreamedResponse streamed;

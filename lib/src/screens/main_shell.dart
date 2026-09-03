@@ -6,8 +6,12 @@ import 'package:flutter_app_utilities/flutter_app_utilities.dart'
     hide AppSpacing;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../services/auto_capture_settings.dart';
+import '../services/call_actions.dart';
+import '../services/call_detection_bridge.dart';
 import '../services/permission_bootstrap.dart';
 import '../state/call_capture.dart';
+import '../state/providers.dart';
 import '../theme/app_colors.dart';
 import '../theme/app_theme.dart';
 import 'home_screen.dart';
@@ -88,6 +92,10 @@ class _MainShellState extends ConsumerState<MainShell>
     // catches every resume regardless of which tab is showing.
     if (state == AppLifecycleState.resumed) {
       unawaited(ref.read(callCaptureProvider.notifier).drainOutbox());
+      // The founder may have changed the organisation name/logo in the web
+      // portal while this app was backgrounded. Refresh it so the signed-in
+      // headers update without requiring the telecaller to log out or restart.
+      ref.invalidate(orgProfileProvider);
     }
   }
 
@@ -122,6 +130,29 @@ class _MainShellState extends ConsumerState<MainShell>
 
   @override
   Widget build(BuildContext context) {
+    // The native detector's lifetime follows the consent toggle. No
+    // fireImmediately needed: the setting always starts false and flips to its
+    // stored value once SharedPreferences loads, so an already-enabled setting
+    // arrives here as a change on every app start.
+    ref.listen<bool>(autoCaptureEnabledProvider, (previous, next) {
+      if (next) {
+        unawaited(startCallDetection());
+      } else if (previous == true) {
+        unawaited(stopCallDetection());
+      }
+    });
+
+    // A call ended somewhere on this phone. If it was to or from a lead, it
+    // gets captured and analysed silently — no navigation, no interruption.
+    ref.listen(callDetectionEventsProvider, (previous, next) {
+      next.whenData((call) {
+        if (!ref.read(autoCaptureEnabledProvider)) return;
+        unawaited(
+          ref.read(callCaptureProvider.notifier).handleDetectedCall(call),
+        );
+      });
+    });
+
     return PopScope(
       // We handle back ourselves (tab switch / exit prompt) rather than letting
       // the framework pop the route, which would exit the app immediately.

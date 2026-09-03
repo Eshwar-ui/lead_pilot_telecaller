@@ -9,6 +9,14 @@ import 'package:lead_pilot_telecaller/src/state/providers.dart';
 // called it, so the "already in your leads" banner on the outbound-lead form
 // could never render. This covers the debounce/cancel/clear behavior added
 // to wire it up.
+//
+// This probe is now only the EARLY warning: saving a duplicate is rejected by
+// the backend with a 409 regardless, so a telecaller who types fast, is
+// offline while typing, or loses a race with a teammate still cannot create a
+// second lead for one number. The last two tests here cover the pieces that
+// serve that path — naming the existing lead's owner, and re-running the probe
+// on demand after a rejected save so the banner and its tap-through appear for
+// a check that never got to run.
 void main() {
   ProviderContainer buildContainer(_FakeApiClient client) {
     final container = ProviderContainer(
@@ -40,6 +48,54 @@ void main() {
     expect(container.read(outboundLeadDraftProvider).hasDuplicate, isFalse);
 
     await Future<void>.delayed(const Duration(milliseconds: 700));
+
+    expect(callCount, 1);
+    final draft = container.read(outboundLeadDraftProvider);
+    expect(draft.hasDuplicate, isTrue);
+    expect(draft.dedupeContactKey, 'existing-1');
+  });
+
+  test('the existing lead\'s owner is carried into the draft', () async {
+    // Without the owner, the banner tells a telecaller the number is "already
+    // in your leads" when, under per-telecaller scoping, they may not be able
+    // to open it at all — a dead end instead of "call Priya".
+    final client = _FakeApiClient(
+      (query) async => {
+        'duplicate': true,
+        'contact_key': 'existing-1',
+        'name': 'Existing Lead',
+        'assigned_to_name': 'Priya Nair',
+      },
+    );
+    final container = buildContainer(client);
+
+    container
+        .read(outboundLeadDraftProvider.notifier)
+        .updatePhone('+919876543210');
+    await Future<void>.delayed(const Duration(milliseconds: 700));
+
+    expect(
+      container.read(outboundLeadDraftProvider).dedupeOwnerName,
+      'Priya Nair',
+    );
+  });
+
+  test('refreshDedupe checks immediately, skipping the debounce', () async {
+    // Called after the backend rejects a save as a duplicate: the banner has
+    // to appear now, not 500ms later, and without waiting for another
+    // keystroke that may never come.
+    var callCount = 0;
+    final client = _FakeApiClient((query) async {
+      callCount++;
+      return {'duplicate': true, 'contact_key': 'existing-1'};
+    });
+    final container = buildContainer(client);
+    final notifier = container.read(outboundLeadDraftProvider.notifier);
+
+    notifier.updatePhone('+919876543210');
+    expect(callCount, 0, reason: 'the debounce has not fired yet');
+
+    await notifier.refreshDedupe();
 
     expect(callCount, 1);
     final draft = container.read(outboundLeadDraftProvider);

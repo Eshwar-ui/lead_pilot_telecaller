@@ -1,7 +1,14 @@
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
     <!-- The INTERNET permission is required for development. Specifically,
          the Flutter tool needs it to communicate with the running application
          to allow setting breakpoints, to provide hot reload, etc.
     -->
     <uses-permission android:name="android.permission.INTERNET"/>
+    <!-- The dev backend is plain http:// on a LAN address (see ApiConfig.dev).
+         Dart's own HttpClient does not consult Android's cleartext policy, so
+         this is belt-and-braces rather than strictly required — but it removes
+         a whole class of "can't reach server" doubt while debugging, and being
+         in src/debug it can never reach a release build. -->
+    <application android:usesCleartextTraffic="true" tools:ignore="UnusedAttribute" />
 </manifest>

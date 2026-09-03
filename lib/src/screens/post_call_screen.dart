@@ -9,6 +9,7 @@ import 'package:flutter_app_utilities/flutter_app_utilities.dart'
     hide AppRadius, AppSpacing;
 
 import '../models/lead.dart';
+import '../routing/back_navigation.dart';
 import '../services/call_actions.dart';
 import '../services/transcription_service.dart';
 import '../state/call_capture.dart';
@@ -195,86 +196,95 @@ class _PostCallScreenState extends ConsumerState<PostCallScreen>
 
     _openSavedCallDetailWhenReady(capture, lead);
 
-    return Scaffold(
-      backgroundColor: AppColors.springWood,
-      bottomNavigationBar: SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(
-            AppSpacing.md,
-            AppSpacing.xs,
-            AppSpacing.md,
-            AppSpacing.sm,
-          ),
-          child: Row(
-            children: [
-              Expanded(
-                child: OutlinedButton.icon(
-                  icon: const Icon(Icons.calendar_today_outlined, size: 16),
-                  label: const Text('Schedule Follow-up'),
-                  onPressed: () =>
-                      ScheduleCallSheet.show(context, lead, daysAhead: 2),
-                  style: OutlinedButton.styleFrom(
-                    foregroundColor: AppColors.blueRibbon,
-                    side: BorderSide(color: AppColors.blueRibbon),
-                    padding: const EdgeInsets.symmetric(
-                      vertical: AppSpacing.sm,
-                    ),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(AppRadius.md),
+    return BackOrFallback(
+      // The overlay service brings the app back after a real call via a
+      // `leadpilot://` deep link (see CallNotesOverlayService), and any
+      // OS-delivered deep link resets go_router's stack to just this route —
+      // Home/Lead Detail are gone from the Flutter navigator even though the
+      // app never actually closed. Route it to Lead Detail instead, same as
+      // the on-screen back arrow below.
+      fallback: '/leads/${lead.id}',
+      child: Scaffold(
+        backgroundColor: AppColors.springWood,
+        bottomNavigationBar: SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(
+              AppSpacing.md,
+              AppSpacing.xs,
+              AppSpacing.md,
+              AppSpacing.sm,
+            ),
+            child: Row(
+              children: [
+                Expanded(
+                  child: OutlinedButton.icon(
+                    icon: const Icon(Icons.calendar_today_outlined, size: 16),
+                    label: const Text('Schedule Follow-up'),
+                    onPressed: () =>
+                        ScheduleCallSheet.show(context, lead, daysAhead: 2),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: AppColors.blueRibbon,
+                      side: BorderSide(color: AppColors.blueRibbon),
+                      padding: const EdgeInsets.symmetric(
+                        vertical: AppSpacing.sm,
+                      ),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(AppRadius.md),
+                      ),
                     ),
                   ),
                 ),
-              ),
-              const SizedBox(width: AppSpacing.sm),
-              Expanded(
-                child: ElevatedButton.icon(
-                  icon: const Icon(Icons.phone_outlined, size: 16),
-                  label: const Text('Call Again'),
-                  onPressed: () => context.go('/leads/${lead.id}/pre-call'),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: AppColors.blueRibbon,
-                    foregroundColor: AppColors.white,
-                    padding: const EdgeInsets.symmetric(
-                      vertical: AppSpacing.sm,
+                const SizedBox(width: AppSpacing.sm),
+                Expanded(
+                  child: ElevatedButton.icon(
+                    icon: const Icon(Icons.phone_outlined, size: 16),
+                    label: const Text('Call Again'),
+                    onPressed: () => context.go('/leads/${lead.id}/pre-call'),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: AppColors.blueRibbon,
+                      foregroundColor: AppColors.white,
+                      padding: const EdgeInsets.symmetric(
+                        vertical: AppSpacing.sm,
+                      ),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(AppRadius.md),
+                      ),
+                      elevation: 0,
                     ),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(AppRadius.md),
-                    ),
-                    elevation: 0,
                   ),
+                ),
+              ],
+            ),
+          ),
+        ),
+        body: SafeArea(
+          child: Column(
+            children: [
+              _CallDetailHeader(lead: lead, analysis: analysis),
+              _TabStrip(
+                tabs: _tabs,
+                selectedIndex: _selectedTab,
+                onSelected: (index) => setState(() => _selectedTab = index),
+              ),
+              Expanded(
+                child: IndexedStack(
+                  index: _selectedTab,
+                  children: [
+                    _SummaryTab(
+                      lead: lead,
+                      notes: callNotes,
+                      rendering: _rendering,
+                      isAnalysing: isAnalysing,
+                      analysis: analysis,
+                      animation: _renderController,
+                    ),
+                    _ScoreTab(lead: lead, analysis: analysis),
+                    _TranscriptTab(leadId: lead.id),
+                  ],
                 ),
               ),
             ],
           ),
-        ),
-      ),
-      body: SafeArea(
-        child: Column(
-          children: [
-            _CallDetailHeader(lead: lead, analysis: analysis),
-            _TabStrip(
-              tabs: _tabs,
-              selectedIndex: _selectedTab,
-              onSelected: (index) => setState(() => _selectedTab = index),
-            ),
-            Expanded(
-              child: IndexedStack(
-                index: _selectedTab,
-                children: [
-                  _SummaryTab(
-                    lead: lead,
-                    notes: callNotes,
-                    rendering: _rendering,
-                    isAnalysing: isAnalysing,
-                    analysis: analysis,
-                    animation: _renderController,
-                  ),
-                  _ScoreTab(lead: lead, analysis: analysis),
-                  _TranscriptTab(leadId: lead.id),
-                ],
-              ),
-            ),
-          ],
         ),
       ),
     );
@@ -303,9 +313,7 @@ class _CallDetailHeader extends StatelessWidget {
             children: [
               LpIconButton(
                 icon: Icons.arrow_back,
-                onTap: () => context.canPop()
-                    ? context.pop()
-                    : context.go('/leads/${lead.id}'),
+                onTap: () => goBackOr(context, '/leads/${lead.id}'),
                 size: 38,
               ),
               const Spacer(),

@@ -51,6 +51,58 @@ void main() {
       expect(client.attempts, 2, reason: 'one retry after the first failure');
     });
 
+    test('an automatic report keeps the body shape it always had', () async {
+      // Phase-0 fields are additive: an unchanged automatic attempt must not
+      // start sending `source: auto` or empty keys, or every existing row's
+      // shape changes for nothing.
+      final client = _RecordingApiClient();
+      final service = CaptureTelemetryService(
+        getToken: () => 'jwt-123',
+        client: client,
+      );
+
+      await service.report('not_found');
+
+      expect(client.posts.single.body, {'outcome': 'not_found'});
+    });
+
+    test('carries the access level so a failure can be interpreted', () async {
+      // "not_found" with all-files access and "not_found" with audio-only
+      // access are different failures with different fixes; the aggregate
+      // cannot separate them without this.
+      final client = _RecordingApiClient();
+      final service = CaptureTelemetryService(
+        getToken: () => 'jwt-123',
+        client: client,
+      );
+
+      await service.report('not_found', accessLevel: 'media_audio');
+
+      expect(
+        (client.posts.single.body as Map)['access_level'],
+        'media_audio',
+      );
+    });
+
+    test('a hand-run check is tagged diagnostic and carries its snapshot', () async {
+      final client = _RecordingApiClient();
+      final service = CaptureTelemetryService(
+        getToken: () => 'jwt-123',
+        client: client,
+      );
+
+      await service.report(
+        'not_found',
+        accessLevel: 'media_audio',
+        source: 'diagnostic',
+        details: {'dirs_existing': 2, 'dirs_readable': 0},
+      );
+
+      final body = client.posts.single.body as Map;
+      expect(body['source'], 'diagnostic');
+      expect(body['details'], {'dirs_existing': 2, 'dirs_readable': 0});
+    });
+
     test('a single success does not trigger a retry', () async {
       final client = _RecordingApiClient();
       final service = CaptureTelemetryService(
@@ -108,22 +160,50 @@ void main() {
     );
 
     test(
-      'each independent capture attempt fires its own report (the '
-      'denominator these stats depend on, not just failures)',
+      'repeat attempts within one capture episode report only once',
       () async {
+        // One ended call runs the scan up to four times on a backoff ladder
+        // (PostCallScreen._captureWithRetries) and again on every app resume.
+        // Reporting each attempt put 15 identical `not_found` rows in the table
+        // in one minute on a real device — which does not enrich the
+        // denominator, it inflates the failure count of precisely the phones
+        // that fail, biasing the rate capture-stats exists to measure.
         final telemetry = _FakeCaptureTelemetryService();
         final container = buildContainer(telemetry);
 
         final notifier = container.read(callCaptureProvider.notifier);
-        // `unsupported` isn't a busy/resolved state (see CallCaptureState
-        // .isBusy/hasRecording), so captureLatest re-runs on every call —
-        // e.g. a manual retry tap — and each run must report independently.
+        await notifier.captureLatest('lead1');
         await notifier.captureLatest('lead1');
         await notifier.captureLatest('lead1');
 
-        expect(telemetry.reported, ['unsupported', 'unsupported']);
+        expect(telemetry.reported, ['unsupported']);
       },
     );
+
+    test('a new call reports again — the episode is the unit, not the app run', () async {
+      // The denominator must still count real calls. resetForNewCall is the
+      // episode boundary, so the next call is a fresh attempt to be counted.
+      final telemetry = _FakeCaptureTelemetryService();
+      final container = buildContainer(telemetry);
+
+      final notifier = container.read(callCaptureProvider.notifier);
+      await notifier.captureLatest('lead1');
+      notifier.resetForNewCall('lead1');
+      await notifier.captureLatest('lead1');
+
+      expect(telemetry.reported, ['unsupported', 'unsupported']);
+    });
+
+    test('each lead is counted separately', () async {
+      final telemetry = _FakeCaptureTelemetryService();
+      final container = buildContainer(telemetry);
+
+      final notifier = container.read(callCaptureProvider.notifier);
+      await notifier.captureLatest('lead1');
+      await notifier.captureLatest('lead2');
+
+      expect(telemetry.reported, ['unsupported', 'unsupported']);
+    });
 
     test(
       'a telemetry backend failure never surfaces in the capture state',
@@ -160,10 +240,17 @@ class _NoopLeadsController extends LeadsController {
 
 class _FakeCaptureTelemetryService extends CaptureTelemetryService {
   final List<String> reported = [];
+  final List<String?> reportedAccessLevels = [];
 
   @override
-  Future<void> report(String outcome) async {
+  Future<void> report(
+    String outcome, {
+    String? accessLevel,
+    String source = 'auto',
+    Map<String, dynamic>? details,
+  }) async {
     reported.add(outcome);
+    reportedAccessLevels.add(accessLevel);
   }
 }
 

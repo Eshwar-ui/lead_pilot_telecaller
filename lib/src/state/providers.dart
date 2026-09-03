@@ -17,6 +17,7 @@ import '../data/mock_leads.dart';
 import '../data/org_profile_repository.dart';
 import '../models/attendance_record.dart';
 import '../models/lead.dart';
+import '../services/auto_capture_settings.dart';
 import '../services/local_call_store.dart';
 import '../services/local_follow_up_store.dart';
 import '../services/local_lead_override_store.dart';
@@ -24,6 +25,7 @@ import '../services/native_call_log_service.dart';
 import '../services/notification_service.dart';
 import '../services/session_store.dart';
 import '../services/user_profile_store.dart';
+import 'call_capture.dart';
 
 // ─── Backend wiring ───────────────────────────────────────────────────────────
 
@@ -698,6 +700,14 @@ class CallLogSyncController extends Notifier<CallLogSyncState> {
     } finally {
       state = state.copyWith(syncing: false);
     }
+
+    // The call log is now current, so this is the moment to look for calls the
+    // telecaller made or took outside the app. Off unless they opted in, and
+    // deliberately after the `syncing` flag is cleared: the sweep does its own
+    // uploads and must not hold the Calls screen's spinner open.
+    if (ref.read(autoCaptureEnabledProvider)) {
+      unawaited(ref.read(callCaptureProvider.notifier).sweepBackfill());
+    }
   }
 }
 
@@ -730,6 +740,7 @@ List<CallLogEntry> callEntriesFromLead(Lead lead, {String? currentUserId}) => [
         leadId: lead.id,
         callId: c.callId,
         sentiment: c.sentiment,
+        captureSource: c.captureSource,
       ),
 ];
 
@@ -928,11 +939,20 @@ class OutboundLeadDraftController extends Notifier<OutboundLeadDraft> {
       state = state.copyWith(
         hasDuplicate: result.duplicate,
         dedupeContactKey: result.contactKey,
+        dedupeOwnerName: result.assignedToName,
       );
     } catch (_) {
-      // Fail soft: dedupe is a convenience warning, not a hard gate on saving.
+      // Fail soft: this probe is the EARLY warning, not the gate. The gate is
+      // the backend's own 409 on save, which fires even when this check never
+      // ran (offline while typing, or a teammate saving the same number in
+      // the half-second between this response and the tap).
     }
   }
+
+  /// Force the duplicate probe now, skipping the debounce — called after the
+  /// backend rejects a save as a duplicate, so the banner and its "view
+  /// existing lead" link appear for a check that never got to run.
+  Future<void> refreshDedupe() => _checkDedupe(state.phone);
 
   void updateReason(String value) => state = state.copyWith(reason: value);
   void updateSource(String value) => state = state.copyWith(source: value);

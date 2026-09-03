@@ -1,11 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 import 'package:flutter_app_utilities/flutter_app_utilities.dart'
     hide AppRadius, AppSpacing;
 
 import '../data/lead_repository.dart';
+import '../routing/back_navigation.dart';
 import '../state/providers.dart';
 import '../theme/app_colors.dart';
 import '../theme/app_spacing.dart';
@@ -142,15 +142,7 @@ class _CallDetailScreenState extends ConsumerState<CallDetailScreen> {
   final _searchController = TextEditingController();
   String _query = '';
 
-  void _goBack() {
-    if (context.canPop()) {
-      context.pop();
-    } else {
-      // Overlay/deep-link navigation can make Call Detail the root route.
-      // Keep the visible back control useful in that case.
-      context.go('/leads/${widget.leadId}');
-    }
-  }
+  void _goBack() => goBackOr(context, '/leads/${widget.leadId}');
 
   // Summary tab's own "View English" toggle — independent of the transcript
   // one above, since a telecaller may only care about one or the other.
@@ -353,132 +345,136 @@ class _CallDetailScreenState extends ConsumerState<CallDetailScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: AppColors.springWood,
-      body: SafeArea(
-        child: FutureBuilder<_CallDetailData>(
-          future: _future,
-          builder: (context, snapshot) {
-            if (snapshot.connectionState != ConnectionState.done) {
+    return BackOrFallback(
+      fallback: '/leads/${widget.leadId}',
+      child: Scaffold(
+        backgroundColor: AppColors.springWood,
+        body: SafeArea(
+          child: FutureBuilder<_CallDetailData>(
+            future: _future,
+            builder: (context, snapshot) {
+              if (snapshot.connectionState != ConnectionState.done) {
+                return Column(
+                  children: [
+                    _Header(
+                      onBack: _goBack,
+                      leadName: widget.args?.leadName ?? '',
+                      calledAt: widget.args?.calledAt,
+                      duration: null,
+                      heroScore: null,
+                      tab: _tab,
+                      onTabChanged: (i) => setState(() => _tab = i),
+                    ),
+                    const Expanded(
+                      child: Center(child: CircularProgressIndicator()),
+                    ),
+                  ],
+                );
+              }
+              if (snapshot.hasError) {
+                return Column(
+                  children: [
+                    _Header(
+                      onBack: _goBack,
+                      leadName: widget.args?.leadName ?? '',
+                      calledAt: widget.args?.calledAt,
+                      duration: null,
+                      heroScore: null,
+                      tab: _tab,
+                      onTabChanged: (i) => setState(() => _tab = i),
+                    ),
+                    Expanded(
+                      child: LpErrorState(
+                        message: snapshot.error.toString(),
+                        onRetry: () {
+                          // An assignment expression returns the assigned Future;
+                          // use a block so setState's callback remains synchronous.
+                          setState(() {
+                            _future = _load();
+                          });
+                        },
+                      ),
+                    ),
+                  ],
+                );
+              }
+
+              final data = snapshot.data!;
+              final overall =
+                  _toInt(data.score['rings']?['overall']?['value']) ??
+                  _toInt(data.analysis['agent_debrief']?['total_score']);
+              // Every analysed call is now scored on its own merits — even
+              // off-topic / wrong-number calls (the analyzer no longer zeroes
+              // them; a genuine wrong number simply scores low). So always show
+              // the hero ring; there's no "not a qualifying lead" hiding anymore.
+              final duration = _approxDuration(data.transcript.turns);
+              final activeTurns = _showEnglish && _translated != null
+                  ? _translated!
+                  : data.transcript.turns;
+              final activeAnalysis =
+                  _showSummaryEnglish && _translatedAnalysis != null
+                  ? _translatedAnalysis!
+                  : data.analysis;
+              final activeScore = _showScoreEnglish && _translatedScore != null
+                  ? _translatedScore!
+                  : data.score;
+              final entityPhrases = _entityPhrases(data.analysis['entities']);
+
               return Column(
                 children: [
                   _Header(
                     onBack: _goBack,
                     leadName: widget.args?.leadName ?? '',
                     calledAt: widget.args?.calledAt,
-                    duration: null,
-                    heroScore: null,
-                    tab: _tab,
-                    onTabChanged: (i) => setState(() => _tab = i),
-                  ),
-                  const Expanded(
-                    child: Center(child: CircularProgressIndicator()),
-                  ),
-                ],
-              );
-            }
-            if (snapshot.hasError) {
-              return Column(
-                children: [
-                  _Header(
-                    onBack: _goBack,
-                    leadName: widget.args?.leadName ?? '',
-                    calledAt: widget.args?.calledAt,
-                    duration: null,
-                    heroScore: null,
+                    duration: duration,
+                    heroScore: overall,
                     tab: _tab,
                     onTabChanged: (i) => setState(() => _tab = i),
                   ),
                   Expanded(
-                    child: LpErrorState(
-                      message: snapshot.error.toString(),
-                      onRetry: () {
-                        // An assignment expression returns the assigned Future;
-                        // use a block so setState's callback remains synchronous.
-                        setState(() {
-                          _future = _load();
-                        });
-                      },
+                    child: IndexedStack(
+                      index: _tab,
+                      children: [
+                        _SummaryTab(
+                          leadId: widget.leadId,
+                          analysis: activeAnalysis,
+                          analysing: data.analysis.isEmpty,
+                          language: data.transcript.language,
+                          showEnglish: _showSummaryEnglish,
+                          translating: _summaryTranslating,
+                          onToggleEnglish: () =>
+                              _toggleSummaryEnglish(data.analysis),
+                          onToast: _toast,
+                          onSaveKeyPoints: _saveKeyPoints,
+                        ),
+                        _ScoreTab(
+                          rings: activeScore,
+                          language: data.transcript.language,
+                          showEnglish: _showScoreEnglish,
+                          translating: _scoreTranslating,
+                          onToggleEnglish: () =>
+                              _toggleScoreEnglish(data.score),
+                        ),
+                        _TranscriptTab(
+                          leadName: widget.args?.leadName ?? 'Lead',
+                          calledAt: widget.args?.calledAt,
+                          duration: duration,
+                          language: data.transcript.language,
+                          showEnglish: _showEnglish,
+                          translating: _translating,
+                          onToggleEnglish: _toggleEnglish,
+                          turns: activeTurns,
+                          searchController: _searchController,
+                          query: _query,
+                          highlightPhrases: entityPhrases,
+                        ),
+                      ],
                     ),
                   ),
                 ],
               );
-            }
-
-            final data = snapshot.data!;
-            final overall =
-                _toInt(data.score['rings']?['overall']?['value']) ??
-                _toInt(data.analysis['agent_debrief']?['total_score']);
-            // Every analysed call is now scored on its own merits — even
-            // off-topic / wrong-number calls (the analyzer no longer zeroes
-            // them; a genuine wrong number simply scores low). So always show
-            // the hero ring; there's no "not a qualifying lead" hiding anymore.
-            final duration = _approxDuration(data.transcript.turns);
-            final activeTurns = _showEnglish && _translated != null
-                ? _translated!
-                : data.transcript.turns;
-            final activeAnalysis =
-                _showSummaryEnglish && _translatedAnalysis != null
-                ? _translatedAnalysis!
-                : data.analysis;
-            final activeScore = _showScoreEnglish && _translatedScore != null
-                ? _translatedScore!
-                : data.score;
-            final entityPhrases = _entityPhrases(data.analysis['entities']);
-
-            return Column(
-              children: [
-                _Header(
-                  onBack: _goBack,
-                  leadName: widget.args?.leadName ?? '',
-                  calledAt: widget.args?.calledAt,
-                  duration: duration,
-                  heroScore: overall,
-                  tab: _tab,
-                  onTabChanged: (i) => setState(() => _tab = i),
-                ),
-                Expanded(
-                  child: IndexedStack(
-                    index: _tab,
-                    children: [
-                      _SummaryTab(
-                        leadId: widget.leadId,
-                        analysis: activeAnalysis,
-                        analysing: data.analysis.isEmpty,
-                        language: data.transcript.language,
-                        showEnglish: _showSummaryEnglish,
-                        translating: _summaryTranslating,
-                        onToggleEnglish: () =>
-                            _toggleSummaryEnglish(data.analysis),
-                        onToast: _toast,
-                        onSaveKeyPoints: _saveKeyPoints,
-                      ),
-                      _ScoreTab(
-                        rings: activeScore,
-                        language: data.transcript.language,
-                        showEnglish: _showScoreEnglish,
-                        translating: _scoreTranslating,
-                        onToggleEnglish: () => _toggleScoreEnglish(data.score),
-                      ),
-                      _TranscriptTab(
-                        leadName: widget.args?.leadName ?? 'Lead',
-                        calledAt: widget.args?.calledAt,
-                        duration: duration,
-                        language: data.transcript.language,
-                        showEnglish: _showEnglish,
-                        translating: _translating,
-                        onToggleEnglish: _toggleEnglish,
-                        turns: activeTurns,
-                        searchController: _searchController,
-                        query: _query,
-                        highlightPhrases: entityPhrases,
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-            );
-          },
+            },
+          ),
         ),
       ),
     );

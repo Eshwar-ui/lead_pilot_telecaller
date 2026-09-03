@@ -6,6 +6,7 @@ import 'package:flutter_app_utilities/flutter_app_utilities.dart';
 
 import '../core/api/api_exception.dart';
 import '../models/lead.dart';
+import '../routing/back_navigation.dart';
 import '../services/call_actions.dart';
 import '../services/local_call_store.dart';
 import '../state/providers.dart';
@@ -55,90 +56,93 @@ class _LeadDetailScreenState extends ConsumerState<LeadDetailScreen> {
     final localCalls = ref.watch(localCallsProvider);
     final mergedHistory = _mergeHistory(lead, localCalls);
 
-    return LpScreen(
-      title: 'Lead Detail',
-      // Normal in-app navigation can pop back to Home. A restored/deep-linked
-      // detail route may have no history, so keep the back button functional by
-      // explicitly returning to the lead list in that case.
-      onBack: () => context.canPop() ? context.pop() : context.go('/home'),
-      trailing: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          LpPill(
-            label: lead.temperature.name,
-            foreground: switch (lead.temperature) {
-              LeadTemperature.hot => AppColors.alizarin,
-              LeadTemperature.warm => AppColors.tahitiGold,
-              LeadTemperature.cold => AppColors.schooner,
-            },
-            background: switch (lead.temperature) {
-              LeadTemperature.hot => AppColors.redSurface,
-              LeadTemperature.warm => AppColors.warningSurface,
-              LeadTemperature.cold => AppColors.pampas,
-            },
-            border: switch (lead.temperature) {
-              LeadTemperature.hot => AppColors.redBorder,
-              LeadTemperature.warm => AppColors.warningBorder,
-              LeadTemperature.cold => AppColors.westar,
-            },
-          ),
-          const AppGap.xs(axis: Axis.horizontal),
-          LpIconButton(
-            icon: Icons.edit_outlined,
-            onTap: () => EditLeadSheet.show(context, lead),
-          ),
-        ],
-      ),
-      bottom: BottomActionBar(
-        children: [
-          Expanded(
-            child: PrimaryButton(
-              label: 'Start Call',
-              icon: Icons.phone_outlined,
-              onTap: () => context.push('/leads/${lead.id}/pre-call'),
+    return BackOrFallback(
+      fallback: '/home',
+      child: LpScreen(
+        title: 'Lead Detail',
+        // Normal in-app navigation can pop back to Home. A restored/deep-linked
+        // detail route may have no history, so keep the back button functional by
+        // explicitly returning to the lead list in that case.
+        onBack: () => goBackOr(context, '/home'),
+        trailing: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            LpPill(
+              label: lead.temperature.name,
+              foreground: switch (lead.temperature) {
+                LeadTemperature.hot => AppColors.alizarin,
+                LeadTemperature.warm => AppColors.tahitiGold,
+                LeadTemperature.cold => AppColors.schooner,
+              },
+              background: switch (lead.temperature) {
+                LeadTemperature.hot => AppColors.redSurface,
+                LeadTemperature.warm => AppColors.warningSurface,
+                LeadTemperature.cold => AppColors.pampas,
+              },
+              border: switch (lead.temperature) {
+                LeadTemperature.hot => AppColors.redBorder,
+                LeadTemperature.warm => AppColors.warningBorder,
+                LeadTemperature.cold => AppColors.westar,
+              },
             ),
-          ),
-          const AppGap.xs(axis: Axis.horizontal),
-          SecondaryButton(
-            label: '',
-            icon: Icons.sms_outlined,
-            onTap: () => launchSms(lead.phone),
-          ),
-          const AppGap.xs(axis: Axis.horizontal),
-          SecondaryButton(
-            label: '',
-            icon: Icons.calendar_today_outlined,
-            onTap: () => ScheduleCallSheet.show(context, lead),
-          ),
-        ],
-      ),
-      child: ListView(
-        padding: const EdgeInsets.fromLTRB(16, 14, 16, 28),
-        children: [
-          LeadSummaryCard(
-            lead: lead,
-            totalCalls: mergedHistory.length > lead.totalCalls
-                ? mergedHistory.length
-                : lead.totalCalls,
-            lastContactLabel: _relativeDay(lead.lastContact),
-          ),
-          const AppGap.md(),
-          _PipelineStrip(leadId: lead.id),
-          const AppGap.md(),
-          CallHistoryPanel(
-            leadId: lead.id,
-            leadName: lead.name,
-            history: mergedHistory,
-            onUploadRecording: () => UploadRecordingSheet.show(context, lead),
-          ),
-          const AppGap.md(),
-          MemoryPanel(lead: lead),
-          const AppGap.md(),
-          _NextStepsPanel(
-            lead: lead,
-            onSchedule: () => ScheduleCallSheet.show(context, lead),
-          ),
-        ],
+            const AppGap.xs(axis: Axis.horizontal),
+            LpIconButton(
+              icon: Icons.edit_outlined,
+              onTap: () => EditLeadSheet.show(context, lead),
+            ),
+          ],
+        ),
+        bottom: BottomActionBar(
+          children: [
+            Expanded(
+              child: PrimaryButton(
+                label: 'Start Call',
+                icon: Icons.phone_outlined,
+                onTap: () => context.push('/leads/${lead.id}/pre-call'),
+              ),
+            ),
+            const AppGap.xs(axis: Axis.horizontal),
+            SecondaryButton(
+              label: '',
+              icon: Icons.sms_outlined,
+              onTap: () => launchSms(lead.phone),
+            ),
+            const AppGap.xs(axis: Axis.horizontal),
+            SecondaryButton(
+              label: '',
+              icon: Icons.calendar_today_outlined,
+              onTap: () => ScheduleCallSheet.show(context, lead),
+            ),
+          ],
+        ),
+        child: ListView(
+          padding: const EdgeInsets.fromLTRB(16, 14, 16, 28),
+          children: [
+            LeadSummaryCard(
+              lead: lead,
+              totalCalls: mergedHistory.length > lead.totalCalls
+                  ? mergedHistory.length
+                  : lead.totalCalls,
+              lastContactLabel: _relativeDay(lead.lastContact),
+            ),
+            const AppGap.md(),
+            _PipelineStrip(leadId: lead.id),
+            const AppGap.md(),
+            CallHistoryPanel(
+              leadId: lead.id,
+              leadName: lead.name,
+              history: mergedHistory,
+              onUploadRecording: () => UploadRecordingSheet.show(context, lead),
+            ),
+            const AppGap.md(),
+            MemoryPanel(lead: lead),
+            const AppGap.md(),
+            _NextStepsPanel(
+              lead: lead,
+              onSchedule: () => ScheduleCallSheet.show(context, lead),
+            ),
+          ],
+        ),
       ),
     );
   }

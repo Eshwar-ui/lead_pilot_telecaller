@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 import 'package:flutter_app_utilities/flutter_app_utilities.dart';
 
 import '../models/lead.dart';
+import '../routing/back_navigation.dart';
 import '../services/call_actions.dart';
 import '../state/providers.dart';
 import '../theme/app_colors.dart';
@@ -58,102 +59,115 @@ class _PreCallScreenState extends ConsumerState<PreCallScreen> {
       orElse: () => leads.isEmpty ? Lead.empty() : leads.first,
     );
 
-    final briefReady = lead.script.openingLine.isNotEmpty ||
+    final briefReady =
+        lead.script.openingLine.isNotEmpty ||
         lead.script.keyPoints.isNotEmpty ||
         lead.script.steps.isNotEmpty ||
         lead.checklist.isNotEmpty ||
         lead.memory.isNotEmpty;
 
-    return LpScreen(
-      title: 'Pre-Call',
-      subtitle: lead.name,
-      bottom: BottomActionBar(
-        caption: 'Call will be recorded with IVR consent in Telugu',
-        children: [
-          Expanded(
-            child: PrimaryButton(
-              label: 'Start Call',
-              icon: Icons.phone_outlined,
-              onTap: () async {
-                final lastCall =
-                    lead.history.isNotEmpty ? lead.history.first : null;
-                // Feed the overlay the memory facts when we have them, else the
-                // AI script's key points — so a first-ever call (no memory yet)
-                // still shows useful org-grounded context in the floating
-                // bubble instead of the "load context first" empty state.
-                final overlayFacts = lead.memory.isNotEmpty
-                    ? lead.memory.take(4).map((m) => m.text).toList()
-                    : lead.script.keyPoints.take(4).toList();
-                final result = await startCallWithNotesBubble(
-                  leadId: lead.id,
-                  leadName: lead.name,
-                  phoneNumber: lead.phone,
-                  leadScore: lead.score,
-                  temperature: lead.temperature.name,
-                  intent: lead.intent,
-                  scriptOpeningLine: lead.script.openingLine,
-                  memoryFacts: overlayFacts,
-                  lastCallTs: lastCall?.calledAt?.toIso8601String() ?? '',
-                  lastCallScore: lastCall?.score ?? 0,
-                  lastCallSummary: lastCall?.title ?? '',
-                );
-                if (!context.mounted) return;
+    return BackOrFallback(
+      // Reached via `context.go(...)` from Post-Call's "Call Again" and "Call
+      // {name} again" actions, which — like the native call-overlay's
+      // deep-link return — replaces the whole go_router stack, leaving this
+      // as the sole route. Without this, the default back arrow
+      // (`Navigator.maybePop()` in LpTopBar) would have nothing to pop to.
+      fallback: '/leads/${lead.id}',
+      child: LpScreen(
+        title: 'Pre-Call',
+        subtitle: lead.name,
+        onBack: () => goBackOr(context, '/leads/${lead.id}'),
+        bottom: BottomActionBar(
+          caption: 'Call will be recorded with IVR consent in Telugu',
+          children: [
+            Expanded(
+              child: PrimaryButton(
+                label: 'Start Call',
+                icon: Icons.phone_outlined,
+                onTap: () async {
+                  final lastCall = lead.history.isNotEmpty
+                      ? lead.history.first
+                      : null;
+                  // Feed the overlay the memory facts when we have them, else the
+                  // AI script's key points — so a first-ever call (no memory yet)
+                  // still shows useful org-grounded context in the floating
+                  // bubble instead of the "load context first" empty state.
+                  final overlayFacts = lead.memory.isNotEmpty
+                      ? lead.memory.take(4).map((m) => m.text).toList()
+                      : lead.script.keyPoints.take(4).toList();
+                  final result = await startCallWithNotesBubble(
+                    leadId: lead.id,
+                    leadName: lead.name,
+                    phoneNumber: lead.phone,
+                    leadScore: lead.score,
+                    temperature: lead.temperature.name,
+                    intent: lead.intent,
+                    scriptOpeningLine: lead.script.openingLine,
+                    memoryFacts: overlayFacts,
+                    lastCallTs: lastCall?.calledAt?.toIso8601String() ?? '',
+                    lastCallScore: lastCall?.score ?? 0,
+                    lastCallSummary: lastCall?.title ?? '',
+                  );
+                  if (!context.mounted) return;
 
-                if (!result.overlayPermissionGranted) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(
-                      content: Text(
-                        'Allow display over other apps, then tap Start Call again.',
+                  if (!result.overlayPermissionGranted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                        content: Text(
+                          'Allow display over other apps, then tap Start Call again.',
+                        ),
                       ),
-                    ),
+                    );
+                    return;
+                  }
+
+                  if (!result.launched) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                        content: Text(
+                          'No calling app available on this device.',
+                        ),
+                      ),
+                    );
+                    return;
+                  }
+
+                  // The call is NOT logged here just because the dialer opened —
+                  // it's logged on the post-call screen only once a recording is
+                  // actually found, so abandoning the dialer doesn't create a
+                  // phantom call entry.
+
+                  // Replace pre-call with post-call so back returns to lead detail.
+                  // extra=true tells PostCallScreen to reset any previous capture
+                  // state so a fresh recording is scanned for.
+                  context.pushReplacement(
+                    '/leads/${lead.id}/post-call',
+                    extra: true,
                   );
-                  return;
-                }
-
-                if (!result.launched) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(
-                      content: Text('No calling app available on this device.'),
-                    ),
-                  );
-                  return;
-                }
-
-                // The call is NOT logged here just because the dialer opened —
-                // it's logged on the post-call screen only once a recording is
-                // actually found, so abandoning the dialer doesn't create a
-                // phantom call entry.
-
-                // Replace pre-call with post-call so back returns to lead detail.
-                // extra=true tells PostCallScreen to reset any previous capture
-                // state so a fresh recording is scanned for.
-                context.pushReplacement(
-                  '/leads/${lead.id}/post-call',
-                  extra: true,
-                );
-              },
+                },
+              ),
             ),
-          ),
-        ],
-      ),
-      child: ListView(
-        padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
-        children: [
-          if (_loading && !briefReady) const _BriefLoadingBanner(),
-          if (!_loading && !briefReady)
-            _BriefUnavailableCard(onRetry: _ensureBrief),
-          LeadSummaryCard(lead: lead),
-          const AppGap.md(),
-          MemoryPanel(lead: lead, compact: true),
-          const AppGap.md(),
-          _OpeningScriptPanel(leadId: lead.id, loading: _loading),
-          const AppGap.md(),
-          _StepsPanel(leadId: lead.id, loading: _loading),
-          const AppGap.md(),
-          _ObjectionPanel(leadId: lead.id),
-          const AppGap.md(),
-          _ChecklistPanel(leadId: lead.id, loading: _loading),
-        ],
+          ],
+        ),
+        child: ListView(
+          padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
+          children: [
+            if (_loading && !briefReady) const _BriefLoadingBanner(),
+            if (!_loading && !briefReady)
+              _BriefUnavailableCard(onRetry: _ensureBrief),
+            LeadSummaryCard(lead: lead),
+            const AppGap.md(),
+            MemoryPanel(lead: lead, compact: true),
+            const AppGap.md(),
+            _OpeningScriptPanel(leadId: lead.id, loading: _loading),
+            const AppGap.md(),
+            _StepsPanel(leadId: lead.id, loading: _loading),
+            const AppGap.md(),
+            _ObjectionPanel(leadId: lead.id),
+            const AppGap.md(),
+            _ChecklistPanel(leadId: lead.id, loading: _loading),
+          ],
+        ),
       ),
     );
   }
@@ -220,8 +234,11 @@ class _BriefUnavailableCard extends StatelessWidget {
         ),
         child: Row(
           children: [
-            const Icon(Icons.info_outline,
-                size: 18, color: AppColors.warningDark),
+            const Icon(
+              Icons.info_outline,
+              size: 18,
+              color: AppColors.warningDark,
+            ),
             const AppGap.sm(axis: Axis.horizontal),
             Expanded(
               child: Text(
@@ -230,10 +247,7 @@ class _BriefUnavailableCard extends StatelessWidget {
               ),
             ),
             const AppGap.xs(axis: Axis.horizontal),
-            TextButton(
-              onPressed: () => onRetry(),
-              child: const Text('Retry'),
-            ),
+            TextButton(onPressed: () => onRetry(), child: const Text('Retry')),
           ],
         ),
       ),
@@ -295,8 +309,9 @@ class _OpeningScriptPanel extends ConsumerWidget {
                         children: [
                           Text(
                             '${i + 1}. ',
-                            style: AppText.body13
-                                .copyWith(color: AppColors.schooner),
+                            style: AppText.body13.copyWith(
+                              color: AppColors.schooner,
+                            ),
                           ),
                           Expanded(
                             child: Text(
@@ -465,8 +480,10 @@ class _PanelPlaceholder extends StatelessWidget {
             ),
           ),
           const AppGap.sm(axis: Axis.horizontal),
-          Text('Generating…',
-              style: AppText.body13.copyWith(color: AppColors.schooner)),
+          Text(
+            'Generating…',
+            style: AppText.body13.copyWith(color: AppColors.schooner),
+          ),
         ],
       );
     }
@@ -534,9 +551,10 @@ class _ChecklistPanel extends ConsumerWidget {
                     ),
                   ),
                   const AppGap.sm(axis: Axis.horizontal),
-                  Text('Building checklist…',
-                      style:
-                          AppText.body13.copyWith(color: AppColors.schooner)),
+                  Text(
+                    'Building checklist…',
+                    style: AppText.body13.copyWith(color: AppColors.schooner),
+                  ),
                 ],
               ),
             ),
@@ -627,7 +645,9 @@ class _ChecklistPanel extends ConsumerWidget {
           controller: controller,
           autofocus: true,
           textCapitalization: TextCapitalization.sentences,
-          decoration: const InputDecoration(hintText: 'e.g. Confirm site visit date'),
+          decoration: const InputDecoration(
+            hintText: 'e.g. Confirm site visit date',
+          ),
         ),
         actions: [
           TextButton(
@@ -638,7 +658,9 @@ class _ChecklistPanel extends ConsumerWidget {
             onPressed: () {
               final text = controller.text.trim();
               if (text.isNotEmpty) {
-                ref.read(checklistExtrasProvider.notifier).addItem(leadId, text);
+                ref
+                    .read(checklistExtrasProvider.notifier)
+                    .addItem(leadId, text);
               }
               Navigator.of(ctx).pop();
             },

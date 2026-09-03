@@ -696,6 +696,16 @@ class _LeadCallTile extends StatelessWidget {
                           background: AppColors.foam,
                           border: AppColors.iceCold,
                         ),
+                      // The app picked this call up on its own — say so, so a
+                      // call the telecaller never started from here isn't a
+                      // mystery entry in their log.
+                      if (entry.isAutoDetected)
+                        LpMiniPill(
+                          label: 'AUTO',
+                          foreground: AppColors.schooner,
+                          background: AppColors.ribbonSurface,
+                          border: AppColors.ribbonBorder,
+                        ),
                     ],
                   ),
                 ],

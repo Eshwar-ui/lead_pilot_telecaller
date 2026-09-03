@@ -5,8 +5,10 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../models/call_recording.dart';
 import '../models/lead.dart';
+import '../services/call_detection_bridge.dart';
 import '../services/call_recording_service.dart';
 import '../services/capture_telemetry_service.dart';
+import '../services/lead_call_matcher.dart';
 import '../services/local_call_store.dart';
 import '../services/local_transcript_store.dart';
 import '../services/local_upload_ledger.dart';
@@ -50,6 +52,32 @@ enum CaptureStatus {
   error,
 }
 
+/// How a recording reached the app. Sent to `/api/calls/upload` as
+/// `capture_source` and stored on the call, so a call that appeared without
+/// the telecaller ever opening the app can be explained afterwards.
+abstract final class CaptureSource {
+  /// The telecaller tapped Call in the app and came back to PostCallScreen.
+  static const appCall = 'app_call';
+
+  /// A call detected as it ended, placed or received outside the app.
+  static const autoDetectedRealtime = 'auto_detected_realtime';
+
+  /// A call found later by sweeping the phone's own call log — the app wasn't
+  /// running when it ended.
+  static const autoDetectedBackfill = 'auto_detected_backfill';
+
+  /// The capture-telemetry `source` for a given capture source. Auto-detected
+  /// calls are reported under their own labels so their success rate (a call
+  /// log entry whose recording is long gone is normal here, and not in the
+  /// app-placed flow) doesn't distort `/api/telemetry/capture-stats`, which
+  /// counts `source="auto"` only.
+  static String telemetryLabel(String captureSource) => switch (captureSource) {
+    autoDetectedRealtime => 'auto_detect_realtime',
+    autoDetectedBackfill => 'auto_detect_backfill',
+    _ => 'auto',
+  };
+}
+
 /// Immutable per-lead capture state held in the [callCaptureProvider] map.
 class CallCaptureState {
   const CallCaptureState({
@@ -59,11 +87,19 @@ class CallCaptureState {
     this.message,
     this.processingLabel,
     this.processingPercent,
+    this.reportedOutcome,
   });
 
   final CaptureStatus status;
   final CallRecording? recording;
   final CallTranscription? transcription;
+
+  /// The capture-telemetry outcome already reported for THIS capture episode,
+  /// so the retry ladder doesn't report the same result over and over.
+  ///
+  /// Cleared by [CallCaptureController.resetForNewCall], which is exactly the
+  /// episode boundary: one real call in, one outcome out.
+  final String? reportedOutcome;
 
   /// User-facing detail for [CaptureStatus.error]/permission states.
   final String? message;
@@ -89,6 +125,7 @@ class CallCaptureState {
     String? message,
     String? processingLabel,
     int? processingPercent,
+    String? reportedOutcome,
   }) {
     return CallCaptureState(
       status: status ?? this.status,
@@ -97,6 +134,9 @@ class CallCaptureState {
       message: message,
       processingLabel: processingLabel ?? this.processingLabel,
       processingPercent: processingPercent ?? this.processingPercent,
+      // Carried forward, unlike `message`: it must survive every state change
+      // within an episode or the dedupe below forgets what it already sent.
+      reportedOutcome: reportedOutcome ?? this.reportedOutcome,
     );
   }
 }
@@ -176,9 +216,18 @@ class CallCaptureController extends Notifier<Map<String, CallCaptureState>> {
   /// many times they tapped it. A manual retry searches with no recency
   /// limit instead, matching findLatestRecording's own documented intent
   /// for "a manual 'pick the latest recording' action".
-  Future<void> captureLatest(String leadId, {bool manual = false}) async {
+  ///
+  /// [captureSource] labels how this call reached the app — see
+  /// [CaptureSource]. It rides through to the upload so a call the telecaller
+  /// never placed from here is distinguishable afterwards.
+  Future<void> captureLatest(
+    String leadId, {
+    bool manual = false,
+    String captureSource = CaptureSource.appCall,
+  }) async {
     final service = ref.read(callRecordingServiceProvider);
     final existing = stateFor(leadId);
+    final telemetrySource = CaptureSource.telemetryLabel(captureSource);
 
     // Skip if busy, already have a recording, or already transcribed.
     if (existing.isBusy ||
@@ -190,7 +239,8 @@ class CallCaptureController extends Notifier<Map<String, CallCaptureState>> {
     _set(leadId, existing.copyWith(status: CaptureStatus.checkingPermission));
 
     final permission = await service.ensureStoragePermission();
-    switch (permission) {
+    final accessLevel = permission.level.wireName;
+    switch (permission.result) {
       case StoragePermissionResult.unsupported:
         _set(
           leadId,
@@ -199,28 +249,34 @@ class CallCaptureController extends Notifier<Map<String, CallCaptureState>> {
             message: 'Call recording capture is available on Android only.',
           ),
         );
-        unawaited(_reportCaptureTelemetry('unsupported'));
+        unawaited(_reportCaptureTelemetry(leadId, 'unsupported', accessLevel, telemetrySource));
         return;
       case StoragePermissionResult.denied:
         _set(
           leadId,
           existing.copyWith(
             status: CaptureStatus.permissionDenied,
-            message: 'Storage access is needed to read the call recording.',
+            message:
+                'Allow access to music and audio so the recording can be read.',
           ),
         );
-        unawaited(_reportCaptureTelemetry('permission_denied'));
+        unawaited(_reportCaptureTelemetry(leadId, 'permission_denied', accessLevel, telemetrySource));
         return;
       case StoragePermissionResult.permanentlyDenied:
         _set(
           leadId,
           existing.copyWith(
             status: CaptureStatus.permissionBlocked,
+            // Names the permission the user can actually grant. The old copy
+            // sent them to "All files access", which Android 13+ greys out for
+            // apps installed outside the Play Store — a dead end that looked
+            // like the telecaller's fault.
             message:
-                'Enable "All files access" in Settings to read recordings.',
+                'Open Settings → Permissions and allow "Music and audio" for '
+                'LeadPilot.',
           ),
         );
-        unawaited(_reportCaptureTelemetry('permission_blocked'));
+        unawaited(_reportCaptureTelemetry(leadId, 'permission_blocked', accessLevel, telemetrySource));
         return;
       case StoragePermissionResult.granted:
         break;
@@ -246,18 +302,18 @@ class CallCaptureController extends Notifier<Map<String, CallCaptureState>> {
           existing.copyWith(
             status: CaptureStatus.notFound,
             message:
-                'No recent recording found. Is auto-record on in your '
-                'dialer?',
+                'No recent recording found. Check that call recording is on '
+                'in your Phone app, or run the Recording Check in Profile.',
           ),
         );
-        unawaited(_reportCaptureTelemetry('not_found'));
+        unawaited(_reportCaptureTelemetry(leadId, 'not_found', accessLevel, telemetrySource));
         return;
       }
       _set(
         leadId,
         existing.copyWith(status: CaptureStatus.found, recording: recording),
       );
-      unawaited(_reportCaptureTelemetry('found'));
+      unawaited(_reportCaptureTelemetry(leadId, 'found', accessLevel, telemetrySource));
       // A recording exists → a real call happened. Log it to My Calls now (real
       // evidence, unlike merely opening the dialer). It later merges with the
       // transcribed backend entry for the same call once the lead is enriched.
@@ -280,13 +336,125 @@ class CallCaptureController extends Notifier<Map<String, CallCaptureState>> {
             ),
       );
       // Auto-start transcription immediately — no manual tap required.
-      unawaited(transcribe(leadId));
+      unawaited(transcribe(leadId, captureSource: captureSource));
     } catch (e) {
       _set(
         leadId,
         existing.copyWith(status: CaptureStatus.error, message: '$e'),
       );
-      unawaited(_reportCaptureTelemetry('error'));
+      unawaited(_reportCaptureTelemetry(leadId, 'error', accessLevel, telemetrySource));
+    }
+  }
+
+  /// Handles a call that just ended on this phone, whoever placed it.
+  ///
+  /// Silent by design: if the number belongs to a lead, the recording is
+  /// captured, uploaded and analysed in the background and simply turns up in
+  /// that lead's history. Nothing navigates and nothing interrupts — the
+  /// telecaller may not even have had the app open when the call happened.
+  Future<void> handleDetectedCall(DetectedCall call) async {
+    // durationSeconds == 0 covers both a missed/unanswered call (no recording
+    // exists) and the fallback path where the call log couldn't be read; in
+    // neither case is there anything to find right now, and the backfill sweep
+    // re-examines the call log later with real duration data.
+    if (call.durationSeconds <= 0) return;
+
+    final leadId = await ref.read(leadCallMatcherProvider).matchLeadId(
+      call.number,
+    );
+    // Not a lead — leave it alone. Uploading it would create one.
+    if (leadId == null) return;
+
+    final existing = stateFor(leadId);
+    if (existing.isBusy) return;
+    if (existing.hasRecording ||
+        existing.status == CaptureStatus.transcribed) {
+      // A previous call to this lead is still parked in state; without this the
+      // guard inside captureLatest would silently drop the call that just
+      // ended.
+      resetForNewCall(leadId);
+    }
+
+    await captureLatest(
+      leadId,
+      captureSource: CaptureSource.autoDetectedRealtime,
+    );
+  }
+
+  /// How far back a backfill sweep looks. A day covers "I called them
+  /// yesterday evening and only opened the app this morning" without
+  /// re-examining weeks of history on every launch — and OEM dialers rotate
+  /// their recording folders long before that anyway.
+  static const backfillWindow = Duration(hours: 24);
+
+  bool _sweeping = false;
+
+  /// Picks up calls the telecaller made or took OUTSIDE the app.
+  ///
+  /// The real-time listener only fires while the app process is alive, which
+  /// on OEMs with aggressive battery management often isn't the case when a
+  /// call ends. The phone's own call log kept the record regardless, so this
+  /// walks it on app open and pushes anything matching a lead through exactly
+  /// the same capture → upload → analyse path an app-placed call takes.
+  ///
+  /// Silent by design: no navigation, no interruption. A picked-up call simply
+  /// appears in the lead's history once it has been processed.
+  ///
+  /// Fail-soft throughout — a lead that can't be matched, or a call whose
+  /// recording the dialer already deleted, is skipped, not surfaced as an
+  /// error. Requires [callLogSyncProvider] to have synced first (the caller
+  /// does that) so the entries being read are current.
+  Future<void> sweepBackfill() async {
+    if (_sweeping) return;
+    _sweeping = true;
+    try {
+      final cutoff = DateTime.now().subtract(backfillWindow);
+      final candidates =
+          [
+            for (final e in ref.read(localCallsProvider))
+              // deviceCallId: only entries from the phone's real call log —
+              // an app-placed call is already handled by PostCallScreen.
+              // callId == null: not already uploaded.
+              // duration > 0: a missed/unanswered call has no recording to find,
+              // and scanning for one only produces noise in the telemetry.
+              if (e.deviceCallId != null &&
+                  e.callId == null &&
+                  e.duration > Duration.zero &&
+                  e.calledAt.isAfter(cutoff))
+                e,
+          ]..sort((a, b) => b.calledAt.compareTo(a.calledAt));
+      if (candidates.isEmpty) return;
+
+      final matcher = ref.read(leadCallMatcherProvider);
+      for (final entry in candidates) {
+        final leadId = entry.leadId ?? await matcher.matchLeadId(entry.phone);
+        // Not a lead — leave it alone. Uploading it would CREATE one.
+        if (leadId == null) continue;
+
+        final existing = stateFor(leadId);
+        if (existing.isBusy) continue;
+        if (existing.hasRecording ||
+            existing.status == CaptureStatus.transcribed) {
+          final captured = existing.recording?.recordedAt;
+          // The state already covers a recording at least as new as this call,
+          // so there's nothing older to go back for.
+          if (captured != null && !captured.isBefore(entry.calledAt)) continue;
+          // A previous, older call to the same lead is still parked in state;
+          // clear it or captureLatest's guard would drop this one silently.
+          resetForNewCall(leadId);
+        }
+
+        // manual: true — no 30-minute recency bound. That bound exists for the
+        // call that JUST ended; a backfilled call is hours old by definition,
+        // and the phone-in-filename hint is what picks the right file here.
+        await captureLatest(
+          leadId,
+          manual: true,
+          captureSource: CaptureSource.autoDetectedBackfill,
+        );
+      }
+    } finally {
+      _sweeping = false;
     }
   }
 
@@ -297,8 +465,35 @@ class CallCaptureController extends Notifier<Map<String, CallCaptureState>> {
   /// Fire-and-forget capture-attempt telemetry — see
   /// [CaptureTelemetryService] doc for why this exists and its fail-soft
   /// contract. Never awaited by callers; never throws.
-  Future<void> _reportCaptureTelemetry(String outcome) =>
-      ref.read(captureTelemetryServiceProvider).report(outcome);
+  ///
+  /// [accessLevel] rides along on every outcome: "not_found" means one thing
+  /// with all-files access and something else entirely with audio-only access,
+  /// and the aggregate cannot tell those apart without it.
+  ///
+  /// ONE report per outcome per capture episode. A single ended call runs the
+  /// scan up to four times on a backoff ladder (see PostCallScreen's
+  /// `_captureWithRetries`, which exists because some dialers flush the file
+  /// late) and runs it again on every app resume — measured on a real device,
+  /// that put 15 identical `not_found` rows in the table inside a minute for
+  /// ONE call. That is worse than noise: it inflates the failure count of
+  /// exactly the phones that fail, biasing the very failure rate
+  /// `/api/telemetry/capture-stats` exists to measure.
+  ///
+  /// A CHANGE of outcome still reports — "not_found then found" is the retry
+  /// ladder doing its job, and that transition is worth knowing about.
+  Future<void> _reportCaptureTelemetry(
+    String leadId,
+    String outcome, [
+    String? accessLevel,
+    String telemetrySource = 'auto',
+  ]) async {
+    final current = stateFor(leadId);
+    if (current.reportedOutcome == outcome) return;
+    _set(leadId, current.copyWith(reportedOutcome: outcome));
+    await ref
+        .read(captureTelemetryServiceProvider)
+        .report(outcome, accessLevel: accessLevel, source: telemetrySource);
+  }
 
   static String _stageLabel(String stage) => switch (stage) {
     'upload' => 'Uploading recording…',
@@ -327,7 +522,10 @@ class CallCaptureController extends Notifier<Map<String, CallCaptureState>> {
   }
 
   /// Uploads the captured recording for speech-to-text.
-  Future<void> transcribe(String leadId) async {
+  Future<void> transcribe(
+    String leadId, {
+    String captureSource = CaptureSource.appCall,
+  }) async {
     final current = stateFor(leadId);
     final recording = current.recording;
     if (recording == null || current.status == CaptureStatus.transcribing) {
@@ -367,6 +565,7 @@ class CallCaptureController extends Notifier<Map<String, CallCaptureState>> {
             source: lead?.source.name,
             contactKey: leadId,
             existingCallId: existingCallId,
+            captureSource: captureSource,
             onCallId: (id) => unawaited(ledger.remember(recording, id)),
             onProgress: (stage, percent) {
               final prior = stateFor(leadId).processingPercent ?? 0;
@@ -412,6 +611,7 @@ class CallCaptureController extends Notifier<Map<String, CallCaptureState>> {
                 source: lead?.source.name,
                 contactKey: leadId,
                 callDateIso: recording.recordedAt.toIso8601String(),
+                captureSource: captureSource,
               ),
             ),
       );
@@ -473,6 +673,7 @@ class CallCaptureController extends Notifier<Map<String, CallCaptureState>> {
                 source: entry.source,
                 contactKey: entry.contactKey ?? entry.leadId,
                 existingCallId: existingCallId,
+                captureSource: entry.captureSource,
                 onCallId: (id) => unawaited(ledger.remember(recording, id)),
               );
           await outbox.remove(entry.path);

@@ -3,6 +3,7 @@ import 'package:flutter_app_utilities/flutter_app_utilities.dart'
     hide AppSpacing, AppRadius;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:package_info_plus/package_info_plus.dart';
 
 import '../models/attendance_record.dart';
 import '../models/lead.dart';
@@ -17,6 +18,13 @@ import '../theme/app_theme.dart';
 import '../widgets/edit_profile_sheet.dart';
 import '../widgets/leadpilot_widgets.dart';
 import '../widgets/organization_logo.dart';
+
+/// The real installed version/build number — was previously a hardcoded
+/// string in this screen that never matched the actual shipped build.
+final appVersionProvider = FutureProvider<String>((ref) async {
+  final info = await PackageInfo.fromPlatform();
+  return '${info.version} (build ${info.buildNumber})';
+});
 
 class ProfileScreen extends ConsumerWidget {
   const ProfileScreen({super.key});
@@ -179,7 +187,7 @@ class ProfileScreen extends ConsumerWidget {
                         icon: Icons.info_outline,
                         label: 'App Version',
                         trailing: Text(
-                          '2.6.1 (build 4421)',
+                          ref.watch(appVersionProvider).value ?? '—',
                           style: AppText.mono(size: 11, color: AppColors.tide),
                         ),
                       ),

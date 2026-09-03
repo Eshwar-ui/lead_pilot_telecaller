@@ -295,8 +295,15 @@ class LeadsController extends Notifier<List<Lead>> {
       // one-off 5xx) must NOT clobber a working inbox with fake leads; that
       // was the "stuck showing stale/cached data" bug.
       if (state.isEmpty) {
-        state = [for (final l in mockLeads) _withOverride(l)];
-        ref.read(leadsUsingFallbackProvider.notifier).set(true);
+        // A genuine connectivity failure (not just this one fetch) means
+        // there's nothing honest to show at all — HomeScreen renders a full
+        // "can't reach the server" screen for that case (see
+        // serverReachableProvider) instead of quietly swapping in sample
+        // leads that look like a real inbox.
+        if (ref.read(serverReachableProvider)) {
+          state = [for (final l in mockLeads) _withOverride(l)];
+          ref.read(leadsUsingFallbackProvider.notifier).set(true);
+        }
       }
     } finally {
       ref.read(leadsLoadingProvider.notifier).set(false);
@@ -547,7 +554,9 @@ class FollowUpController extends Notifier<List<FollowUpTask>> {
     // The device alarm scheduled at creation time (see schedule_call_sheet.dart)
     // has no idea the task is done — without this it fires on schedule anyway,
     // showing a reminder for a follow-up the telecaller already completed.
-    await NotificationService.instance.cancel(NotificationService.notifIdFor(id));
+    await NotificationService.instance.cancel(
+      NotificationService.notifIdFor(id),
+    );
     // Reflect immediately. A concurrent reconcile is safe here — "done" is
     // sticky, so even if the backend hasn't recorded it yet the local done
     // isn't reverted.
@@ -568,7 +577,9 @@ class FollowUpController extends Notifier<List<FollowUpTask>> {
     await ref.read(localFollowUpStoreProvider).delete(id);
     // Same reasoning as markDone: the standing device alarm doesn't know the
     // task was deleted and would otherwise still fire at the original time.
-    await NotificationService.instance.cancel(NotificationService.notifIdFor(id));
+    await NotificationService.instance.cancel(
+      NotificationService.notifIdFor(id),
+    );
     // Reflect the removal immediately in memory.
     state = [
       for (final t in state)

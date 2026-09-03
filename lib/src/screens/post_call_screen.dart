@@ -1750,7 +1750,7 @@ class _CallRecordingCard extends ConsumerWidget {
         return (
           Icons.lock_outline,
           AppColors.tahitiGold,
-          'Enable "All files access"',
+          'Storage access blocked',
           capture.message ?? 'Turn it on in Settings to read recordings.',
         );
       case CaptureStatus.unsupported:

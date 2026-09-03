@@ -154,9 +154,8 @@ final transcriptionServiceProvider = Provider<TranscriptionService>(
 /// tests so `captureLatest`'s reporting can be verified without a real
 /// backend/device.
 final captureTelemetryServiceProvider = Provider<CaptureTelemetryService>(
-  (ref) => CaptureTelemetryService(
-    getToken: () => ref.read(sessionProvider).token,
-  ),
+  (ref) =>
+      CaptureTelemetryService(getToken: () => ref.read(sessionProvider).token),
 );
 
 /// Drives capturing the dialer's recording and turning it into a transcript,
@@ -249,7 +248,14 @@ class CallCaptureController extends Notifier<Map<String, CallCaptureState>> {
             message: 'Call recording capture is available on Android only.',
           ),
         );
-        unawaited(_reportCaptureTelemetry(leadId, 'unsupported', accessLevel, telemetrySource));
+        unawaited(
+          _reportCaptureTelemetry(
+            leadId,
+            'unsupported',
+            accessLevel,
+            telemetrySource,
+          ),
+        );
         return;
       case StoragePermissionResult.denied:
         _set(
@@ -260,7 +266,14 @@ class CallCaptureController extends Notifier<Map<String, CallCaptureState>> {
                 'Allow access to music and audio so the recording can be read.',
           ),
         );
-        unawaited(_reportCaptureTelemetry(leadId, 'permission_denied', accessLevel, telemetrySource));
+        unawaited(
+          _reportCaptureTelemetry(
+            leadId,
+            'permission_denied',
+            accessLevel,
+            telemetrySource,
+          ),
+        );
         return;
       case StoragePermissionResult.permanentlyDenied:
         _set(
@@ -276,7 +289,14 @@ class CallCaptureController extends Notifier<Map<String, CallCaptureState>> {
                 'LeadPilot.',
           ),
         );
-        unawaited(_reportCaptureTelemetry(leadId, 'permission_blocked', accessLevel, telemetrySource));
+        unawaited(
+          _reportCaptureTelemetry(
+            leadId,
+            'permission_blocked',
+            accessLevel,
+            telemetrySource,
+          ),
+        );
         return;
       case StoragePermissionResult.granted:
         break;
@@ -306,14 +326,23 @@ class CallCaptureController extends Notifier<Map<String, CallCaptureState>> {
                 'in your Phone app, or run the Recording Check in Profile.',
           ),
         );
-        unawaited(_reportCaptureTelemetry(leadId, 'not_found', accessLevel, telemetrySource));
+        unawaited(
+          _reportCaptureTelemetry(
+            leadId,
+            'not_found',
+            accessLevel,
+            telemetrySource,
+          ),
+        );
         return;
       }
       _set(
         leadId,
         existing.copyWith(status: CaptureStatus.found, recording: recording),
       );
-      unawaited(_reportCaptureTelemetry(leadId, 'found', accessLevel, telemetrySource));
+      unawaited(
+        _reportCaptureTelemetry(leadId, 'found', accessLevel, telemetrySource),
+      );
       // A recording exists → a real call happened. Log it to My Calls now (real
       // evidence, unlike merely opening the dialer). It later merges with the
       // transcribed backend entry for the same call once the lead is enriched.
@@ -342,7 +371,9 @@ class CallCaptureController extends Notifier<Map<String, CallCaptureState>> {
         leadId,
         existing.copyWith(status: CaptureStatus.error, message: '$e'),
       );
-      unawaited(_reportCaptureTelemetry(leadId, 'error', accessLevel, telemetrySource));
+      unawaited(
+        _reportCaptureTelemetry(leadId, 'error', accessLevel, telemetrySource),
+      );
     }
   }
 
@@ -359,16 +390,15 @@ class CallCaptureController extends Notifier<Map<String, CallCaptureState>> {
     // re-examines the call log later with real duration data.
     if (call.durationSeconds <= 0) return;
 
-    final leadId = await ref.read(leadCallMatcherProvider).matchLeadId(
-      call.number,
-    );
+    final leadId = await ref
+        .read(leadCallMatcherProvider)
+        .matchLeadId(call.number);
     // Not a lead — leave it alone. Uploading it would create one.
     if (leadId == null) return;
 
     final existing = stateFor(leadId);
     if (existing.isBusy) return;
-    if (existing.hasRecording ||
-        existing.status == CaptureStatus.transcribed) {
+    if (existing.hasRecording || existing.status == CaptureStatus.transcribed) {
       // A previous call to this lead is still parked in state; without this the
       // guard inside captureLatest would silently drop the call that just
       // ended.
@@ -409,20 +439,19 @@ class CallCaptureController extends Notifier<Map<String, CallCaptureState>> {
     _sweeping = true;
     try {
       final cutoff = DateTime.now().subtract(backfillWindow);
-      final candidates =
-          [
-            for (final e in ref.read(localCallsProvider))
-              // deviceCallId: only entries from the phone's real call log —
-              // an app-placed call is already handled by PostCallScreen.
-              // callId == null: not already uploaded.
-              // duration > 0: a missed/unanswered call has no recording to find,
-              // and scanning for one only produces noise in the telemetry.
-              if (e.deviceCallId != null &&
-                  e.callId == null &&
-                  e.duration > Duration.zero &&
-                  e.calledAt.isAfter(cutoff))
-                e,
-          ]..sort((a, b) => b.calledAt.compareTo(a.calledAt));
+      final candidates = [
+        for (final e in ref.read(localCallsProvider))
+          // deviceCallId: only entries from the phone's real call log —
+          // an app-placed call is already handled by PostCallScreen.
+          // callId == null: not already uploaded.
+          // duration > 0: a missed/unanswered call has no recording to find,
+          // and scanning for one only produces noise in the telemetry.
+          if (e.deviceCallId != null &&
+              e.callId == null &&
+              e.duration > Duration.zero &&
+              e.calledAt.isAfter(cutoff))
+            e,
+      ]..sort((a, b) => b.calledAt.compareTo(a.calledAt));
       if (candidates.isEmpty) return;
 
       final matcher = ref.read(leadCallMatcherProvider);
@@ -466,8 +495,8 @@ class CallCaptureController extends Notifier<Map<String, CallCaptureState>> {
   /// [CaptureTelemetryService] doc for why this exists and its fail-soft
   /// contract. Never awaited by callers; never throws.
   ///
-  /// [accessLevel] rides along on every outcome: "not_found" means one thing
-  /// with all-files access and something else entirely with audio-only access,
+  /// [accessLevel] rides along on every outcome: "not_found" means something
+  /// different with legacy storage access than with media-audio-only access,
   /// and the aggregate cannot tell those apart without it.
   ///
   /// ONE report per outcome per capture episode. A single ended call runs the

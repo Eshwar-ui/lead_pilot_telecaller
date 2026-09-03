@@ -121,6 +121,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
   @override
   Widget build(BuildContext context) {
     final padding = MediaQuery.paddingOf(context);
+    final reachable = ref.watch(serverReachableProvider);
 
     return AnnotatedRegion<SystemUiOverlayStyle>(
       value: SystemUiOverlayStyle.light,
@@ -210,81 +211,101 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                           ),
                         ],
                       ),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.stretch,
-                        children: [
-                          Text(
-                            'Welcome back',
-                            style: AppText.display24.copyWith(fontSize: 24),
-                          ),
-                          const SizedBox(height: 6),
-                          Text(
-                            'Sign in to see your assigned leads.',
-                            style: AppText.body14.copyWith(
-                              color: AppColors.schooner,
-                            ),
-                          ),
-                          const SizedBox(height: 28),
-                          FormShell(
-                            label: 'Email',
-                            required: true,
-                            child: LpTextField(
-                              value: _email,
-                              onChanged: (v) => setState(() => _email = v),
-                              focused: true,
-                              enabled: !_loading,
-                              keyboardType: TextInputType.emailAddress,
-                            ),
-                          ),
-                          const SizedBox(height: 16),
-                          FormShell(
-                            label: 'Password',
-                            required: true,
-                            child: LpTextField(
-                              value: _password,
-                              onChanged: (v) => setState(() => _password = v),
-                              obscureText: _obscurePassword,
-                              enabled: !_loading,
-                              suffixIcon: IconButton(
-                                icon: Icon(
-                                  _obscurePassword
-                                      ? Icons.visibility_off_outlined
-                                      : Icons.visibility_outlined,
-                                  size: 20,
-                                  color: AppColors.schooner,
+                      child: !reachable
+                          ? NoServerConnectionScreen(
+                              title: "Can't reach the server",
+                              message:
+                                  'Check your internet connection, or the '
+                                  'server may be temporarily down.',
+                              retryLabel: 'Try Again',
+                              onRetry: () => ref
+                                  .read(serverReachableProvider.notifier)
+                                  .retryNow(),
+                              wrapWithScaffold: false,
+                            )
+                          : Column(
+                              crossAxisAlignment: CrossAxisAlignment.stretch,
+                              children: [
+                                Text(
+                                  'Welcome back',
+                                  style: AppText.display24.copyWith(
+                                    fontSize: 24,
+                                  ),
                                 ),
-                                tooltip: _obscurePassword
-                                    ? 'Show password'
-                                    : 'Hide password',
-                                onPressed: () => setState(
-                                  () => _obscurePassword = !_obscurePassword,
+                                const SizedBox(height: 6),
+                                Text(
+                                  'Sign in to see your assigned leads.',
+                                  style: AppText.body14.copyWith(
+                                    color: AppColors.schooner,
+                                  ),
                                 ),
-                              ),
+                                const SizedBox(height: 28),
+                                FormShell(
+                                  label: 'Email',
+                                  required: true,
+                                  child: LpTextField(
+                                    value: _email,
+                                    onChanged: (v) =>
+                                        setState(() => _email = v),
+                                    focused: true,
+                                    enabled: !_loading,
+                                    keyboardType: TextInputType.emailAddress,
+                                  ),
+                                ),
+                                const SizedBox(height: 16),
+                                FormShell(
+                                  label: 'Password',
+                                  required: true,
+                                  child: LpTextField(
+                                    value: _password,
+                                    onChanged: (v) =>
+                                        setState(() => _password = v),
+                                    obscureText: _obscurePassword,
+                                    enabled: !_loading,
+                                    suffixIcon: IconButton(
+                                      icon: Icon(
+                                        _obscurePassword
+                                            ? Icons.visibility_off_outlined
+                                            : Icons.visibility_outlined,
+                                        size: 20,
+                                        color: AppColors.schooner,
+                                      ),
+                                      tooltip: _obscurePassword
+                                          ? 'Show password'
+                                          : 'Hide password',
+                                      onPressed: () => setState(
+                                        () => _obscurePassword =
+                                            !_obscurePassword,
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                                if (_error != null) ...[
+                                  const SizedBox(height: 16),
+                                  _ErrorBanner(
+                                    kind: _errorKind,
+                                    message: _error!,
+                                  ),
+                                ],
+                                const SizedBox(height: 28),
+                                PrimaryButton(
+                                  label: 'Sign in to Asan Telecaller',
+                                  icon: Icons.arrow_forward_rounded,
+                                  onTap: _submit,
+                                  loading: _loading,
+                                ),
+                                const SizedBox(height: 18),
+                                Text(
+                                  'New here? Ask your founder or manager to invite you.\n'
+                                  'Telecallers are added from the web portal.',
+                                  textAlign: TextAlign.center,
+                                  style: AppText.caption11.copyWith(
+                                    color: AppColors.schooner,
+                                    height: 1.55,
+                                  ),
+                                ),
+                              ],
                             ),
-                          ),
-                          if (_error != null) ...[
-                            const SizedBox(height: 16),
-                            _ErrorBanner(kind: _errorKind, message: _error!),
-                          ],
-                          const SizedBox(height: 28),
-                          PrimaryButton(
-                            label: 'Sign in to Asan Telecaller',
-                            icon: Icons.arrow_forward_rounded,
-                            onTap: _submit,
-                            loading: _loading,
-                          ),
-                          const SizedBox(height: 18),
-                          Text(
-                            'New here? Ask your founder or manager to invite you.\n'
-                            'Telecallers are added from the web portal.',
-                            textAlign: TextAlign.center,
-                            style: AppText.caption11.copyWith(
-                              color: AppColors.schooner,
-                              height: 1.55,
-                            ),
-                          ),
-                        ],
-                      ),
                     ),
                   ],
                 ),

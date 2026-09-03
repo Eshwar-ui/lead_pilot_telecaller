@@ -36,6 +36,7 @@ class _RecordingCheckScreenState extends ConsumerState<RecordingCheckScreen> {
   RecordingDiagnosticsReport? _report;
   bool _running = false;
   bool _sent = false;
+  bool _hasFolderAccess = false;
 
   @override
   void initState() {
@@ -51,10 +52,13 @@ class _RecordingCheckScreenState extends ConsumerState<RecordingCheckScreen> {
       _running = true;
       _sent = false;
     });
+    const service = CallRecordingService();
+    final hasFolderAccess = await service.hasRecordingsFolderAccess();
     final report = await const RecordingDiagnostics().run();
     if (!mounted) return;
     setState(() {
       _report = report;
+      _hasFolderAccess = hasFolderAccess;
       _running = false;
     });
     // Report every run automatically. The whole point of Phase 0 is a fleet
@@ -89,18 +93,22 @@ class _RecordingCheckScreenState extends ConsumerState<RecordingCheckScreen> {
     await _run();
   }
 
-  Future<void> _grantAllFiles() async {
-    const service = CallRecordingService();
-    await service.requestAllFilesAccess();
-    await _run();
-  }
-
   /// The automatic in-call ask for battery-optimization/MIUI-autostart
   /// exemption fires at most once per app process, with no way back in if
   /// the telecaller dismissed it — a very plausible thing to do mid-call,
   /// before understanding why it matters. This re-shows it on demand.
   Future<void> _grantBackgroundPermissions() async {
     await requestBackgroundPermissions();
+  }
+
+  /// MediaStore can't see a `.nomedia`-hidden recordings folder (the MIUI
+  /// signature — `.nomedia` opts a tree out of the media scanner only, not
+  /// out of the Storage Access Framework). Granting this folder once lets
+  /// the app read it directly, restoring automatic capture on those phones.
+  Future<void> _grantRecordingsFolder() async {
+    const service = CallRecordingService();
+    await service.pickRecordingsFolder();
+    await _run();
   }
 
   void _copyReport() {
@@ -134,6 +142,11 @@ class _RecordingCheckScreenState extends ConsumerState<RecordingCheckScreen> {
                 ..._actions(report),
                 const AppGap(AppSpacing.sm),
                 _BackgroundPermissionsCard(onTap: _grantBackgroundPermissions),
+                const AppGap(AppSpacing.sm),
+                _RecordingsFolderCard(
+                  granted: _hasFolderAccess,
+                  onTap: _grantRecordingsFolder,
+                ),
                 const AppGap(AppSpacing.sm),
                 _DeviceCard(report: report),
                 const AppGap(AppSpacing.sm),
@@ -173,24 +186,6 @@ class _RecordingCheckScreenState extends ConsumerState<RecordingCheckScreen> {
           child: const Text('Grant permission'),
         ),
       ],
-      // Offer the escalation whenever access is short of all-files, including
-      // when the probe found no folders at all: a folder the app may not stat
-      // is indistinguishable from an absent one, and on MIUI that is exactly
-      // what happens — 81 real recordings in a folder that reads as missing.
-      //
-      // This deliberately does NOT hide itself on Android 13+. That guess was
-      // wrong on real hardware (a sideloaded app on Android 16 gets a working
-      // toggle) and hid the only button that fixes the phone.
-      RecordingVerdict.foldersUnreadable ||
-      RecordingVerdict.noFolders ||
-      RecordingVerdict.foldersEmpty
-          when report.accessLevel != StorageAccessLevel.allFiles =>
-        [
-          FilledButton(
-            onPressed: _grantAllFiles,
-            child: const Text('Grant "All files access"'),
-          ),
-        ],
       _ => const [],
     };
   }
@@ -288,6 +283,58 @@ class _BackgroundPermissionsCard extends StatelessWidget {
   }
 }
 
+/// Always visible, like [_BackgroundPermissionsCard] above — some dialers
+/// (MIUI's, mainly) save recordings into a folder marked `.nomedia`, which
+/// hides it from MediaStore entirely and no permission fixes. Granting this
+/// folder once via the system picker restores automatic capture on those
+/// phones; re-grantable any time (e.g. if the OS later revokes the grant).
+class _RecordingsFolderCard extends StatelessWidget {
+  const _RecordingsFolderCard({required this.granted, required this.onTap});
+
+  final bool granted;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return LpCard(
+      child: Row(
+        children: [
+          Icon(
+            granted ? Icons.folder_open : Icons.folder_off_outlined,
+            size: 18,
+            color: granted ? AppColors.greenHaze : AppColors.schooner,
+          ),
+          const AppGap(AppSpacing.sm, axis: Axis.horizontal),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Recordings folder access',
+                  style: AppText.body14.copyWith(fontWeight: FontWeight.w700),
+                ),
+                Text(
+                  granted
+                      ? 'Access granted. Re-select if recordings stop being found.'
+                      : "Some phones (MIUI, especially) hide their recordings "
+                            "folder from this app's normal search. Pick it "
+                            'once here to fix that.',
+                  style: AppText.caption11.copyWith(color: AppColors.schooner),
+                ),
+              ],
+            ),
+          ),
+          const AppGap(AppSpacing.xs, axis: Axis.horizontal),
+          OutlinedButton(
+            onPressed: onTap,
+            child: Text(granted ? 'Change' : 'Grant access'),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class _DeviceCard extends StatelessWidget {
   const _DeviceCard({required this.report});
 
@@ -315,18 +362,12 @@ class _DeviceCard extends StatelessWidget {
                 : '${report.osVersion ?? 'Android'} (API ${report.sdkInt})',
           ),
           _Row(label: 'File access', value: _accessLabel(report.accessLevel)),
-          if (report.allFilesUnavailable)
-            _Row(
-              label: 'All files access',
-              value: 'Blocked by Android (app not installed from Play Store)',
-            ),
         ],
       ),
     );
   }
 
   static String _accessLabel(StorageAccessLevel level) => switch (level) {
-    StorageAccessLevel.allFiles => 'All files',
     StorageAccessLevel.mediaAudio => 'Music and audio only',
     StorageAccessLevel.legacy => 'Storage (legacy)',
     StorageAccessLevel.none => 'None',
@@ -340,21 +381,21 @@ class _FoldersCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final existing = report.existingDirs;
+    final withAudio = report.dirs.where((d) => d.audioFiles > 0).toList();
     return LpCard(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text('RECORDING FOLDERS', style: AppText.label11),
           const AppGap(AppSpacing.xs),
-          if (existing.isEmpty)
+          if (withAudio.isEmpty)
             Text(
-              'None of the ${report.dirs.length} known folders exist on this '
-              'phone.',
+              'None of the ${report.dirs.length} known folders hold any '
+              'audio files this app can see.',
               style: AppText.body13.copyWith(color: AppColors.schooner),
             )
           else
-            for (final dir in existing) ...[
+            for (final dir in withAudio) ...[
               Padding(
                 padding: const EdgeInsets.symmetric(vertical: 5),
                 child: Column(
@@ -368,17 +409,11 @@ class _FoldersCard extends StatelessWidget {
                     ),
                     const AppGap(2),
                     Text(
-                      !dir.readable
-                          ? 'Cannot be opened by this app'
-                          : dir.audioFiles == 0
-                          ? 'Readable, no audio files'
-                          : '${dir.audioFiles} audio file'
-                                '${dir.audioFiles == 1 ? '' : 's'}'
-                                '${dir.newestAudioAge == null ? '' : ' · newest ${_age(dir.newestAudioAge!)}'}',
+                      '${dir.audioFiles} audio file'
+                      '${dir.audioFiles == 1 ? '' : 's'}'
+                      '${dir.newestAudioAge == null ? '' : ' · newest ${_age(dir.newestAudioAge!)}'}',
                       style: AppText.caption11.copyWith(
-                        color: dir.readable
-                            ? AppColors.schooner
-                            : AppColors.alizarin,
+                        color: AppColors.schooner,
                       ),
                     ),
                   ],

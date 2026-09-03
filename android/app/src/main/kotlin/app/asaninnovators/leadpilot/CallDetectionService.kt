@@ -81,6 +81,14 @@ class CallDetectionService : Service() {
      * (inbound only — an outbound number is never reported there).
      */
     private fun readLatestCallWithRetries(fallbackNumber: String?, attempt: Int) {
+        // Checked once, here, rather than inside readLatestCallLogEntry() on
+        // every retry: the permission can't change mid-loop, so re-checking on
+        // each of the (up to CALL_LOG_READ_ATTEMPTS) retries only burns extra
+        // checkSelfPermission calls before falling back to the same result.
+        if (!hasPermission(Manifest.permission.READ_CALL_LOG)) {
+            emitFallbackOrNothing(fallbackNumber)
+            return
+        }
         val entry = readLatestCallLogEntry()
         if (entry != null) {
             CallDetectionEventBridge.emit(entry)
@@ -93,23 +101,29 @@ class CallDetectionService : Service() {
             )
             return
         }
-        // Call log unreadable (permission revoked, OEM quirk) — an inbound
-        // number from the RINGING callback is better than nothing. Duration is
-        // unknown here, so it's reported as 0 and Dart treats it as unknown.
-        if (!fallbackNumber.isNullOrBlank()) {
-            CallDetectionEventBridge.emit(
-                DetectedCall(
-                    number = fallbackNumber,
-                    isInbound = true,
-                    durationSeconds = 0,
-                    timestampMs = System.currentTimeMillis(),
-                )
+        emitFallbackOrNothing(fallbackNumber)
+    }
+
+    /**
+     * Call log unreadable (permission revoked, OEM quirk, or missing outright)
+     * — an inbound number from the RINGING callback is better than nothing.
+     * Duration is unknown here, so it's reported as 0 and Dart treats it as
+     * unknown. A no-op if there's no fallback number either (e.g. an outbound
+     * call, which is never reported by the RINGING callback).
+     */
+    private fun emitFallbackOrNothing(fallbackNumber: String?) {
+        if (fallbackNumber.isNullOrBlank()) return
+        CallDetectionEventBridge.emit(
+            DetectedCall(
+                number = fallbackNumber,
+                isInbound = true,
+                durationSeconds = 0,
+                timestampMs = System.currentTimeMillis(),
             )
-        }
+        )
     }
 
     private fun readLatestCallLogEntry(): DetectedCall? {
-        if (!hasPermission(Manifest.permission.READ_CALL_LOG)) return null
         return try {
             contentResolver.query(
                 CallLog.Calls.CONTENT_URI,

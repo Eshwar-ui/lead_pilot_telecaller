@@ -253,6 +253,32 @@ class _UploadRecordingSheetState extends ConsumerState<UploadRecordingSheet> {
     }
   }
 
+  /// Handles a tap on a result from the auto-find list. Those results are
+  /// MediaStore-backed metadata, not yet real local files (see
+  /// [CallRecording.contentUri]) — materializing copies bytes for only the
+  /// one recording actually picked, rather than every candidate the list
+  /// showed. Falls straight through to [_uploadPath] for a recording that's
+  /// already a real file (contentUri null).
+  Future<void> _pickFoundRecording(CallRecording recording) async {
+    if (recording.contentUri == null) {
+      await _uploadPath(recording.path, recording.fileName);
+      return;
+    }
+    final resolved = await ref
+        .read(callRecordingServiceProvider)
+        .materialize(recording);
+    if (!mounted) return;
+    if (resolved == null) {
+      setState(() {
+        _phase = _UpPhase.error;
+        _error = 'That recording is no longer available on this phone.';
+        _errorIsTimeout = false;
+      });
+      return;
+    }
+    await _uploadPath(resolved.path, resolved.fileName);
+  }
+
   Future<void> _uploadPath(String path, String fileName) async {
     if (_busy) return;
 
@@ -518,7 +544,7 @@ class _UploadRecordingSheetState extends ConsumerState<UploadRecordingSheet> {
                     onFind: _findRecordings,
                     onOpenSettings: () =>
                         ref.read(callRecordingServiceProvider).openSettings(),
-                    onPickRecording: (r) => _uploadPath(r.path, r.fileName),
+                    onPickRecording: _pickFoundRecording,
                   ),
                   const AppGap.sm(),
                   Center(
@@ -625,7 +651,12 @@ class _UploadRecordingSheetState extends ConsumerState<UploadRecordingSheet> {
 bool? _matchesPhone(CallRecording recording, String? leadPhone) {
   final digits = CallRecordingService.phoneDigits(leadPhone);
   if (digits.isEmpty) return null;
-  return CallRecordingService.fileNameDigits(recording.path).contains(digits);
+  // fileName, not path: a MediaStore-backed result (see
+  // CallRecording.contentUri) hasn't been materialized to a real local file
+  // yet, so path is empty until the telecaller actually picks it.
+  return CallRecordingService.fileNameDigits(
+    recording.fileName,
+  ).contains(digits);
 }
 
 class _AutoFindSection extends StatelessWidget {

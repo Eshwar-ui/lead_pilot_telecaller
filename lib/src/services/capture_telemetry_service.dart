@@ -40,7 +40,7 @@ class CaptureTelemetryService {
   /// (and [CaptureStatus] in call_capture.dart).
   ///
   /// [accessLevel] is how much storage access the app actually held —
-  /// `not_found` at `media_audio` and `not_found` at `all_files` are entirely
+  /// `not_found` at `media_audio` and `not_found` at `legacy` are entirely
   /// different failures, and without this the aggregate cannot separate them.
   /// [details] carries the folder-probe snapshot from a hand-run Recording
   /// Check (see RecordingDiagnosticsReport.toJson); [source] marks such runs

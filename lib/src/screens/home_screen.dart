@@ -54,10 +54,12 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     final q = _query.trim().toLowerCase();
     if (q.isEmpty) return all;
     return all
-        .where((l) =>
-            l.name.toLowerCase().contains(q) ||
-            l.phone.toLowerCase().contains(q) ||
-            l.intent.toLowerCase().contains(q))
+        .where(
+          (l) =>
+              l.name.toLowerCase().contains(q) ||
+              l.phone.toLowerCase().contains(q) ||
+              l.intent.toLowerCase().contains(q),
+        )
         .toList();
   }
 
@@ -67,20 +69,35 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     final filtered = _applySearch(_applyFilter(leads));
     final usingFallback = ref.watch(leadsUsingFallbackProvider);
     final loading = ref.watch(leadsLoadingProvider) && leads.isEmpty;
+    // Genuinely unreachable AND nothing to show at all (no real leads, no
+    // mock fallback either — see LeadsController._load) — a full-screen
+    // state beats a bare empty list with no explanation.
+    final noServer = !ref.watch(serverReachableProvider) && leads.isEmpty;
 
     return Scaffold(
       backgroundColor: AppColors.springWood,
       body: SafeArea(
-        child: Column(
-          children: [
-            _buildHeader(context),
-            if (usingFallback)
-              LpFallbackBanner(
-                onRetry: () => ref.read(leadsProvider.notifier).refresh(),
+        child: noServer
+            ? NoServerConnectionScreen(
+                title: "Can't reach the server",
+                message:
+                    'Check your internet connection, or the server may be '
+                    'temporarily down.',
+                retryLabel: 'Try Again',
+                onRetry: () =>
+                    ref.read(serverReachableProvider.notifier).retryNow(),
+                wrapWithScaffold: false,
+              )
+            : Column(
+                children: [
+                  _buildHeader(context),
+                  if (usingFallback)
+                    LpFallbackBanner(
+                      onRetry: () => ref.read(leadsProvider.notifier).refresh(),
+                    ),
+                  Expanded(child: _buildScrollBody(context, filtered, loading)),
+                ],
               ),
-            Expanded(child: _buildScrollBody(context, filtered, loading)),
-          ],
-        ),
       ),
     );
   }
@@ -117,9 +134,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                     ),
                   ),
                 ),
-                if (ref.watch(followUpsProvider).any(
-                  (t) => t.status != FollowUpStatus.done,
-                ))
+                if (ref
+                    .watch(followUpsProvider)
+                    .any((t) => t.status != FollowUpStatus.done))
                   Positioned(
                     right: 9,
                     top: 9,
@@ -159,88 +176,107 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
 
   // ── Scrollable body ────────────────────────────────────────────────────────
 
-  Widget _buildScrollBody(BuildContext context, List<Lead> leads, bool loading) {
+  Widget _buildScrollBody(
+    BuildContext context,
+    List<Lead> leads,
+    bool loading,
+  ) {
     return CustomScrollView(
       slivers: [
         // Stats row — computed from real data.
         SliverToBoxAdapter(
           child: Padding(
-            padding: const EdgeInsets.fromLTRB(AppSpacing.md, AppSpacing.md, AppSpacing.md, 0),
-            child: Builder(builder: (_) {
-              final callLog = ref.watch(callLogProvider);
-              final now = DateTime.now();
-              final callsToday = callLog.where((e) =>
-                  e.calledAt.year == now.year &&
-                  e.calledAt.month == now.month &&
-                  e.calledAt.day == now.day);
-              // Real per-call sentiment from the backend (call_sentiment_label:
-              // the prospect's average turn sentiment, not a score proxy) —
-              // null for a call with no sentiment signal yet (not analyzed, or
-              // a native device-log entry with no backend analysis at all), so
-              // those are correctly excluded rather than miscounted either way.
-              final positiveToday =
-                  callsToday.where((e) => e.sentiment == 'positive').length;
-              final followUpsDue = ref
-                  .watch(followUpsProvider)
-                  .where((t) => t.dueToday && t.status != FollowUpStatus.done)
-                  .length;
-              final highIntent = ref
-                  .watch(leadsProvider)
-                  .where((l) => l.intent.toLowerCase().contains('high'))
-                  .length;
-              return Column(
-                children: [
-                  Row(
-                    children: [
-                      Expanded(
-                        child: _StatTile(
-                          icon: Icons.call_outlined,
-                          label: 'Calls Today',
-                          value: '${callsToday.length}',
+            padding: const EdgeInsets.fromLTRB(
+              AppSpacing.md,
+              AppSpacing.md,
+              AppSpacing.md,
+              0,
+            ),
+            child: Builder(
+              builder: (_) {
+                final callLog = ref.watch(callLogProvider);
+                final now = DateTime.now();
+                final callsToday = callLog.where(
+                  (e) =>
+                      e.calledAt.year == now.year &&
+                      e.calledAt.month == now.month &&
+                      e.calledAt.day == now.day,
+                );
+                // Real per-call sentiment from the backend (call_sentiment_label:
+                // the prospect's average turn sentiment, not a score proxy) —
+                // null for a call with no sentiment signal yet (not analyzed, or
+                // a native device-log entry with no backend analysis at all), so
+                // those are correctly excluded rather than miscounted either way.
+                final positiveToday = callsToday
+                    .where((e) => e.sentiment == 'positive')
+                    .length;
+                final followUpsDue = ref
+                    .watch(followUpsProvider)
+                    .where((t) => t.dueToday && t.status != FollowUpStatus.done)
+                    .length;
+                final highIntent = ref
+                    .watch(leadsProvider)
+                    .where((l) => l.intent.toLowerCase().contains('high'))
+                    .length;
+                return Column(
+                  children: [
+                    Row(
+                      children: [
+                        Expanded(
+                          child: _StatTile(
+                            icon: Icons.call_outlined,
+                            label: 'Calls Today',
+                            value: '${callsToday.length}',
+                          ),
                         ),
-                      ),
-                      const SizedBox(width: AppSpacing.sm),
-                      Expanded(
-                        child: _StatTile(
-                          icon: Icons.check_circle_outline,
-                          label: 'Positive Calls',
-                          value: '$positiveToday',
-                          valueColor: AppColors.salem,
+                        const SizedBox(width: AppSpacing.sm),
+                        Expanded(
+                          child: _StatTile(
+                            icon: Icons.check_circle_outline,
+                            label: 'Positive Calls',
+                            value: '$positiveToday',
+                            valueColor: AppColors.salem,
+                          ),
                         ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: AppSpacing.sm),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: _StatTile(
-                          icon: Icons.event_outlined,
-                          label: 'Follow-ups Due',
-                          value: '$followUpsDue',
-                          valueColor: AppColors.tahitiGold,
+                      ],
+                    ),
+                    const SizedBox(height: AppSpacing.sm),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: _StatTile(
+                            icon: Icons.event_outlined,
+                            label: 'Follow-ups Due',
+                            value: '$followUpsDue',
+                            valueColor: AppColors.tahitiGold,
+                          ),
                         ),
-                      ),
-                      const SizedBox(width: AppSpacing.sm),
-                      Expanded(
-                        child: _StatTile(
-                          icon: Icons.bolt,
-                          label: 'High Intent Leads',
-                          value: '$highIntent',
-                          valueColor: AppColors.blueRibbon,
+                        const SizedBox(width: AppSpacing.sm),
+                        Expanded(
+                          child: _StatTile(
+                            icon: Icons.bolt,
+                            label: 'High Intent Leads',
+                            value: '$highIntent',
+                            valueColor: AppColors.blueRibbon,
+                          ),
                         ),
-                      ),
-                    ],
-                  ),
-                ],
-              );
-            }),
+                      ],
+                    ),
+                  ],
+                );
+              },
+            ),
           ),
         ),
         // Search bar
         SliverToBoxAdapter(
           child: Padding(
-            padding: const EdgeInsets.fromLTRB(AppSpacing.md, AppSpacing.md, AppSpacing.md, 0),
+            padding: const EdgeInsets.fromLTRB(
+              AppSpacing.md,
+              AppSpacing.md,
+              AppSpacing.md,
+              0,
+            ),
             child: _buildSearchBar(),
           ),
         ),
@@ -254,7 +290,12 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
         // Lead list, loading skeleton, or empty state
         if (loading)
           SliverPadding(
-            padding: const EdgeInsets.fromLTRB(AppSpacing.md, AppSpacing.sm, AppSpacing.md, 100),
+            padding: const EdgeInsets.fromLTRB(
+              AppSpacing.md,
+              AppSpacing.sm,
+              AppSpacing.md,
+              100,
+            ),
             sliver: SliverList.separated(
               itemCount: 5,
               separatorBuilder: (_, _) => const SizedBox(height: AppSpacing.sm),
@@ -289,7 +330,12 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
           )
         else
           SliverPadding(
-            padding: const EdgeInsets.fromLTRB(AppSpacing.md, AppSpacing.sm, AppSpacing.md, 100),
+            padding: const EdgeInsets.fromLTRB(
+              AppSpacing.md,
+              AppSpacing.sm,
+              AppSpacing.md,
+              100,
+            ),
             sliver: SliverList.separated(
               itemCount: leads.length,
               separatorBuilder: (_, _) => const SizedBox(height: AppSpacing.sm),
@@ -309,7 +355,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
         Expanded(
           child: Container(
             height: 44,
-            padding: const EdgeInsets.only(left: AppSpacing.sm, right: AppSpacing.xs),
+            padding: const EdgeInsets.only(
+              left: AppSpacing.sm,
+              right: AppSpacing.xs,
+            ),
             decoration: BoxDecoration(
               color: AppColors.white,
               borderRadius: BorderRadius.circular(AppRadius.lg),
@@ -341,8 +390,11 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                       _searchController.clear();
                       setState(() => _query = '');
                     },
-                    child: const Icon(Icons.close,
-                        size: 16, color: AppColors.schooner),
+                    child: const Icon(
+                      Icons.close,
+                      size: 16,
+                      color: AppColors.schooner,
+                    ),
                   ),
               ],
             ),
@@ -359,7 +411,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
               children: [
                 Container(
                   decoration: BoxDecoration(
-                    color: filterActive ? AppColors.blueRibbon : AppColors.white,
+                    color: filterActive
+                        ? AppColors.blueRibbon
+                        : AppColors.white,
                     borderRadius: BorderRadius.circular(AppRadius.lg),
                     border: Border.all(
                       color: filterActive
@@ -385,8 +439,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                       decoration: BoxDecoration(
                         color: AppColors.white,
                         shape: BoxShape.circle,
-                        border:
-                            Border.all(color: AppColors.blueRibbon, width: 1),
+                        border: Border.all(
+                          color: AppColors.blueRibbon,
+                          width: 1,
+                        ),
                       ),
                     ),
                   ),
@@ -407,7 +463,12 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
       ),
       builder: (sheetContext) => SafeArea(
         child: Padding(
-          padding: const EdgeInsets.fromLTRB(AppSpacing.lg, AppSpacing.lg, AppSpacing.lg, AppSpacing.xl),
+          padding: const EdgeInsets.fromLTRB(
+            AppSpacing.lg,
+            AppSpacing.lg,
+            AppSpacing.lg,
+            AppSpacing.xl,
+          ),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -423,7 +484,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                   ),
                 ),
               ),
-              Text('Filter leads', style: AppText.display20.copyWith(fontSize: 18)),
+              Text(
+                'Filter leads',
+                style: AppText.display20.copyWith(fontSize: 18),
+              ),
               const SizedBox(height: AppSpacing.md),
               for (final f in _filters)
                 TapScale(
@@ -433,8 +497,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                   },
                   child: Container(
                     margin: const EdgeInsets.only(bottom: AppSpacing.xs),
-                    padding:
-                        const EdgeInsets.symmetric(horizontal: AppSpacing.md, vertical: AppSpacing.sm),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: AppSpacing.md,
+                      vertical: AppSpacing.sm,
+                    ),
                     decoration: BoxDecoration(
                       color: f == _filter
                           ? AppColors.ribbonSurface
@@ -460,8 +526,11 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                           ),
                         ),
                         if (f == _filter)
-                          const Icon(Icons.check,
-                              size: 18, color: AppColors.blueRibbon),
+                          const Icon(
+                            Icons.check,
+                            size: 18,
+                            color: AppColors.blueRibbon,
+                          ),
                       ],
                     ),
                   ),
@@ -760,7 +829,9 @@ class _LeadTile extends ConsumerWidget {
                             shape: BoxShape.circle,
                             boxShadow: [
                               BoxShadow(
-                                color: AppColors.blueRibbon.withValues(alpha: 0.25),
+                                color: AppColors.blueRibbon.withValues(
+                                  alpha: 0.25,
+                                ),
                                 offset: const Offset(0, 2),
                                 blurRadius: 4,
                               ),

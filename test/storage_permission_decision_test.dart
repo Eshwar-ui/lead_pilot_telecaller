@@ -3,51 +3,28 @@ import 'package:lead_pilot_telecaller/src/services/call_recording_service.dart';
 import 'package:permission_handler/permission_handler.dart';
 
 /// Pins the permission decision behind auto-capture — the reason recordings
-/// stopped being detected on Samsung and other Android 13+ handsets.
-///
-/// The old flow REQUESTED `MANAGE_EXTERNAL_STORAGE` first and treated its
-/// refusal as fatal. On Android 13+ that permission is withheld from apps
-/// installed outside the Play Store (Restricted Settings), and the fallback —
-/// `READ_EXTERNAL_STORAGE` — is itself capped at maxSdkVersion 32 in the
-/// manifest. So capture dead-ended on every modern phone with a message
-/// telling the user to enable a Settings toggle that is greyed out.
+/// stopped being detected on Samsung and other Android 13+ handsets, and now
+/// the whole basis for the MediaStore-based scan (no more
+/// `MANAGE_EXTERNAL_STORAGE` — Google Play rejected that declaration).
 ///
 /// `decideAccess` is the whole decision as a pure function, so these run
 /// without a device.
 void main() {
   group('CallRecordingService.decideAccess — Android 13+', () {
-    test(
-      'audio permission alone is enough to scan, even with all-files refused',
-      () {
-        // The regression that broke Samsung: this case used to be "denied".
-        final outcome = CallRecordingService.decideAccess(
-          sdkInt: 34,
-          allFiles: PermissionStatus.permanentlyDenied,
-          mediaAudio: PermissionStatus.granted,
-          legacyStorage: PermissionStatus.denied,
-        );
-
-        expect(outcome.result, StoragePermissionResult.granted);
-        expect(outcome.level, StorageAccessLevel.mediaAudio);
-      },
-    );
-
-    test('all-files access, when actually held, wins and reports full reach', () {
+    test('the audio permission grants media-audio access', () {
       final outcome = CallRecordingService.decideAccess(
         sdkInt: 34,
-        allFiles: PermissionStatus.granted,
-        mediaAudio: PermissionStatus.denied,
+        mediaAudio: PermissionStatus.granted,
         legacyStorage: PermissionStatus.denied,
       );
 
       expect(outcome.result, StoragePermissionResult.granted);
-      expect(outcome.level, StorageAccessLevel.allFiles);
+      expect(outcome.level, StorageAccessLevel.mediaAudio);
     });
 
     test('refusing the audio permission is denied, and retryable', () {
       final outcome = CallRecordingService.decideAccess(
         sdkInt: 34,
-        allFiles: PermissionStatus.denied,
         mediaAudio: PermissionStatus.denied,
         legacyStorage: PermissionStatus.denied,
       );
@@ -57,66 +34,23 @@ void main() {
     });
 
     test(
-      'only the permission we actually asked for can send the user to Settings',
+      'a permanently-denied audio permission sends the user to Settings',
       () {
-        // All-files access being unavailable must NOT read as "permanently
-        // denied": that routed the user to an ungrantable toggle. Blocked is
-        // reserved for the audio permission, which Settings really can fix.
-        final allFilesRefused = CallRecordingService.decideAccess(
+        final outcome = CallRecordingService.decideAccess(
           sdkInt: 34,
-          allFiles: PermissionStatus.permanentlyDenied,
-          mediaAudio: PermissionStatus.denied,
-          legacyStorage: PermissionStatus.denied,
-        );
-        expect(allFilesRefused.result, StoragePermissionResult.denied);
-
-        final audioBlocked = CallRecordingService.decideAccess(
-          sdkInt: 34,
-          allFiles: PermissionStatus.permanentlyDenied,
           mediaAudio: PermissionStatus.permanentlyDenied,
           legacyStorage: PermissionStatus.denied,
         );
-        expect(audioBlocked.result, StoragePermissionResult.permanentlyDenied);
+
+        expect(outcome.result, StoragePermissionResult.permanentlyDenied);
       },
     );
-
-    test(
-      'does NOT assume all-files access is unavailable just because of the OS',
-      () {
-        // Measured on real hardware: a sideloaded app on a Xiaomi running
-        // Android 16 (API 36) gets a perfectly usable "Allow access to manage
-        // all files" toggle. Inferring "blocked" from the API level hid the one
-        // button that fixes that phone, whose dialer writes recordings to a
-        // .nomedia folder that audio permission alone cannot open.
-        final outcome = CallRecordingService.decideAccess(
-          sdkInt: 36,
-          allFiles: PermissionStatus.denied,
-          mediaAudio: PermissionStatus.granted,
-          legacyStorage: PermissionStatus.denied,
-        );
-
-        expect(outcome.allFilesUnavailable, isFalse);
-      },
-    );
-
-    test('reports it unavailable only after a request actually came back refused', () {
-      final outcome = CallRecordingService.decideAccess(
-        sdkInt: 34,
-        allFiles: PermissionStatus.denied,
-        mediaAudio: PermissionStatus.granted,
-        legacyStorage: PermissionStatus.denied,
-        allFilesRefused: true,
-      );
-
-      expect(outcome.allFilesUnavailable, isTrue);
-    });
   });
 
   group('CallRecordingService.decideAccess — Android 12 and below', () {
     test('the legacy storage permission still grants access', () {
       final outcome = CallRecordingService.decideAccess(
         sdkInt: 30,
-        allFiles: PermissionStatus.denied,
         mediaAudio: PermissionStatus.denied,
         legacyStorage: PermissionStatus.granted,
       );
@@ -130,27 +64,12 @@ void main() {
       // would report access the app does not have.
       final outcome = CallRecordingService.decideAccess(
         sdkInt: 30,
-        allFiles: PermissionStatus.denied,
         mediaAudio: PermissionStatus.granted,
         legacyStorage: PermissionStatus.denied,
       );
 
       expect(outcome.result, StoragePermissionResult.denied);
     });
-
-    test(
-      'all-files access is still worth offering — Settings allows it here',
-      () {
-        final outcome = CallRecordingService.decideAccess(
-          sdkInt: 30,
-          allFiles: PermissionStatus.denied,
-          mediaAudio: PermissionStatus.denied,
-          legacyStorage: PermissionStatus.granted,
-        );
-
-        expect(outcome.allFilesUnavailable, isFalse);
-      },
-    );
 
     test(
       'an unknown SDK level falls back to the legacy branch, not to nothing',
@@ -160,7 +79,6 @@ void main() {
         // nothing would make capture impossible.
         final outcome = CallRecordingService.decideAccess(
           sdkInt: 0,
-          allFiles: PermissionStatus.denied,
           mediaAudio: PermissionStatus.denied,
           legacyStorage: PermissionStatus.granted,
         );
@@ -175,10 +93,179 @@ void main() {
     test('matches the backend CaptureAccessLevel vocabulary', () {
       // Drift here silently 422s every telemetry report, and telemetry is
       // fire-and-forget — nothing would surface the break.
-      expect(StorageAccessLevel.allFiles.wireName, 'all_files');
       expect(StorageAccessLevel.mediaAudio.wireName, 'media_audio');
       expect(StorageAccessLevel.legacy.wireName, 'legacy');
       expect(StorageAccessLevel.none.wireName, 'none');
+    });
+  });
+
+  group('CallRecordingService.relativePathHints', () {
+    test('strips the storage-volume prefix and adds a trailing slash', () {
+      final hints = CallRecordingService.relativePathHints;
+
+      expect(hints, isNotEmpty);
+      expect(
+        hints,
+        contains('MIUI/sound_recorder/call_rec/'),
+        reason:
+            '/storage/emulated/0/MIUI/sound_recorder/call_rec must map to '
+            'this MediaStore RELATIVE_PATH fragment',
+      );
+      for (final hint in hints) {
+        expect(hint, isNot(startsWith('/')));
+        expect(hint, endsWith('/'));
+      }
+    });
+
+    test('every candidate folder produces exactly one hint', () {
+      expect(
+        CallRecordingService.relativePathHints.length,
+        CallRecordingService.candidateDirs.length,
+      );
+    });
+  });
+
+  group('CallRecordingService.selectBestMatch', () {
+    Map<String, dynamic> row({
+      required String contentUri,
+      required String displayName,
+      required int dateModifiedMs,
+      int sizeBytes = 100000,
+    }) => {
+      'contentUri': contentUri,
+      'displayName': displayName,
+      'dateModifiedMs': dateModifiedMs,
+      'sizeBytes': sizeBytes,
+    };
+
+    final now = DateTime(2026, 1, 1, 12);
+
+    test('a phone-matched row wins over a merely-newer unmatched row', () {
+      final rows = [
+        row(
+          contentUri: 'content://a',
+          displayName: 'Amit_9123456780.m4a',
+          dateModifiedMs: now.millisecondsSinceEpoch,
+        ),
+        row(
+          contentUri: 'content://b',
+          displayName: 'Priya_9876543210.m4a',
+          dateModifiedMs: now
+              .subtract(const Duration(minutes: 5))
+              .millisecondsSinceEpoch,
+        ),
+      ];
+
+      final chosen = CallRecordingService.selectBestMatch(
+        rows,
+        phoneHint: '+91 98765 43210',
+        within: const Duration(minutes: 30),
+        now: now,
+      );
+
+      expect(chosen?['contentUri'], 'content://b');
+    });
+
+    test('falls back to newest-in-window with no filename match', () {
+      final rows = [
+        row(
+          contentUri: 'content://old',
+          displayName: 'recording.m4a',
+          dateModifiedMs: now
+              .subtract(const Duration(minutes: 20))
+              .millisecondsSinceEpoch,
+        ),
+        row(
+          contentUri: 'content://new',
+          displayName: 'recording2.m4a',
+          dateModifiedMs: now
+              .subtract(const Duration(minutes: 2))
+              .millisecondsSinceEpoch,
+        ),
+      ];
+
+      final chosen = CallRecordingService.selectBestMatch(
+        rows,
+        phoneHint: '9876543210',
+        within: const Duration(minutes: 30),
+        now: now,
+      );
+
+      expect(chosen?['contentUri'], 'content://new');
+    });
+
+    test('a row outside the recency window is excluded', () {
+      final rows = [
+        row(
+          contentUri: 'content://too-old',
+          displayName: 'recording.m4a',
+          dateModifiedMs: now
+              .subtract(const Duration(hours: 2))
+              .millisecondsSinceEpoch,
+        ),
+      ];
+
+      final chosen = CallRecordingService.selectBestMatch(
+        rows,
+        phoneHint: null,
+        within: const Duration(minutes: 30),
+        now: now,
+      );
+
+      expect(chosen, isNull);
+    });
+
+    test('a placeholder file under the size floor is excluded', () {
+      final rows = [
+        row(
+          contentUri: 'content://placeholder',
+          displayName: 'recording.m4a',
+          dateModifiedMs: now.millisecondsSinceEpoch,
+          sizeBytes: 100,
+        ),
+      ];
+
+      final chosen = CallRecordingService.selectBestMatch(
+        rows,
+        phoneHint: null,
+        within: const Duration(minutes: 30),
+        now: now,
+      );
+
+      expect(chosen, isNull);
+    });
+
+    test('within: null ignores recency entirely', () {
+      final rows = [
+        row(
+          contentUri: 'content://ancient',
+          displayName: 'recording.m4a',
+          dateModifiedMs: now
+              .subtract(const Duration(days: 30))
+              .millisecondsSinceEpoch,
+        ),
+      ];
+
+      final chosen = CallRecordingService.selectBestMatch(
+        rows,
+        phoneHint: null,
+        within: null,
+        now: now,
+      );
+
+      expect(chosen?['contentUri'], 'content://ancient');
+    });
+
+    test('an empty row list has no match', () {
+      expect(
+        CallRecordingService.selectBestMatch(
+          const [],
+          phoneHint: '9876543210',
+          within: const Duration(minutes: 30),
+          now: now,
+        ),
+        isNull,
+      );
     });
   });
 }

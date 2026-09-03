@@ -16,10 +16,22 @@ class CallRecording {
     required this.fileName,
     required this.sizeBytes,
     required this.recordedAt,
+    this.contentUri,
   });
 
   /// Absolute path to the audio file on the device.
+  ///
+  /// Empty when [contentUri] is set and this recording hasn't been
+  /// materialized to a local file yet — see [contentUri].
   final String path;
+
+  /// Non-null when this recording was found via a MediaStore query
+  /// ([CallRecordingService.listRecentRecordings]) rather than resolved to a
+  /// real local file yet. [path]/[file] are not valid to read until this has
+  /// been materialized via `CallRecordingService.materialize`, which copies
+  /// the MediaStore-referenced bytes into a real local file (MediaStore never
+  /// hands back a raw filesystem path this app can rely on reading directly).
+  final String? contentUri;
 
   /// File name including extension (e.g. `call_rec_20260612_114830.mp3`).
   final String fileName;
@@ -57,6 +69,23 @@ class CallRecording {
       fileName: name,
       sizeBytes: stat.size,
       recordedAt: stat.modified,
+    );
+  }
+
+  /// From a MediaStore query row (see `CallRecordingService`/
+  /// `call_actions.findRecentAudioRecordings`) — not yet materialized to a
+  /// local file, so [path] is empty and reading [file] will fail until
+  /// `CallRecordingService.materialize` has been called on this recording.
+  factory CallRecording.fromMediaStoreRow(Map<String, dynamic> row) {
+    final contentUri = row['contentUri'] as String;
+    return CallRecording(
+      path: '',
+      fileName: (row['displayName'] as String?) ?? '',
+      sizeBytes: (row['sizeBytes'] as num?)?.toInt() ?? 0,
+      recordedAt: DateTime.fromMillisecondsSinceEpoch(
+        (row['dateModifiedMs'] as num?)?.toInt() ?? 0,
+      ),
+      contentUri: contentUri,
     );
   }
 }

@@ -5,6 +5,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'local_database.dart';
+
 import 'push_notification_service.dart';
 
 /// The logged-in telecaller's identity + JWT. Models server identity (who is
@@ -102,6 +104,15 @@ class SessionController extends Notifier<Session> {
     await _storage.delete(key: _userKey);
     final prefs = await SharedPreferences.getInstance();
     await prefs.clear();
+    // The call log and the call transcripts moved out of SharedPreferences
+    // into SQLite, which `prefs.clear()` does not reach. Without this they
+    // would outlive the session that produced them and be visible to the next
+    // telecaller to sign in on the same phone — including what was actually
+    // said on those calls. Fail-soft: a storage error must not strand someone
+    // in a half-logged-out state.
+    try {
+      await AppDatabase.instance.clearAll();
+    } catch (_) {}
     state = Session.empty;
   }
 
@@ -119,6 +130,31 @@ class SessionController extends Notifier<Session> {
     user['must_reset_password'] = false;
     await _storage.write(key: _userKey, value: jsonEncode(user));
     state = _sessionFrom(token, user);
+  }
+
+  /// Rewrite the stored user record from the server's own copy.
+  ///
+  /// The session's name/email/role are a SNAPSHOT taken at login (they ride in
+  /// the login response), so a founder editing a telecaller from the dashboard
+  /// left this device showing the old values until the next logout. This lets
+  /// the Profile screen pull the authoritative record instead.
+  ///
+  /// Silently no-ops when there's no session — same defensive read-from-
+  /// storage as [clearMustResetPassword], since a concurrent force-logout can
+  /// clear it mid-call.
+  Future<void> refreshIdentity(Map<String, dynamic> user) async {
+    final token = await _storage.read(key: _tokenKey);
+    if (token == null) return;
+    final stored = await _storage.read(key: _userKey);
+    // Merge rather than replace: /api/auth/me doesn't carry
+    // `must_reset_password`, and dropping it would silently release a user
+    // from the forced password change.
+    final merged = <String, dynamic>{
+      if (stored != null) ...jsonDecode(stored) as Map<String, dynamic>,
+      ...user,
+    };
+    await _storage.write(key: _userKey, value: jsonEncode(merged));
+    state = _sessionFrom(token, merged);
   }
 
   static Session _sessionFrom(String token, Map<String, dynamic> user) =>

@@ -3,7 +3,12 @@ import 'package:lead_pilot_telecaller/src/services/local_transcript_store.dart';
 import 'package:lead_pilot_telecaller/src/services/transcription_service.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'support/test_database.dart';
+
 void main() {
+  // Transcripts live in SQLite now; SharedPreferences is still mocked because
+  // the store's first open runs the one-time migration off it.
+  useInMemoryDatabase();
   setUp(() => SharedPreferences.setMockInitialValues({}));
 
   test('persists the backend call ID with a captured transcript', () async {

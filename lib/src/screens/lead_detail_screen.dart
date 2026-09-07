@@ -8,12 +8,12 @@ import '../core/api/api_exception.dart';
 import '../models/lead.dart';
 import '../routing/back_navigation.dart';
 import '../services/call_actions.dart';
-import '../services/local_call_store.dart';
 import '../state/providers.dart';
 import '../theme/app_colors.dart';
 import '../theme/app_theme.dart';
 import '../widgets/deal_closed_sheet.dart';
 import '../widgets/edit_lead_sheet.dart';
+import '../widgets/call_recording_player.dart';
 import '../widgets/leadpilot_widgets.dart';
 import '../widgets/schedule_call_sheet.dart';
 import '../widgets/upload_recording_sheet.dart';
@@ -53,7 +53,10 @@ class _LeadDetailScreenState extends ConsumerState<LeadDetailScreen> {
     );
 
     // Merge any locally-recorded calls for this lead into the backend history.
-    final localCalls = ref.watch(localCallsProvider);
+    // Read by lead id off its own index: the in-memory call log is a page now,
+    // so an older lead's calls may simply not be in it — this lead's history
+    // must not depend on how far the Calls screen happens to be scrolled.
+    final localCalls = ref.watch(leadCallsProvider(leadId)).value ?? const [];
     final mergedHistory = _mergeHistory(lead, localCalls);
 
     return BackOrFallback(
@@ -84,6 +87,15 @@ class _LeadDetailScreenState extends ConsumerState<LeadDetailScreen> {
                 LeadTemperature.warm => AppColors.warningBorder,
                 LeadTemperature.cold => AppColors.westar,
               },
+            ),
+            const AppGap.xs(axis: Axis.horizontal),
+            // Customer status toggle. Filled when they already are one, so the
+            // current state is readable without opening anything.
+            LpIconButton(
+              icon: lead.isClient
+                  ? Icons.verified
+                  : Icons.verified_outlined,
+              onTap: () => _toggleClient(lead),
             ),
             const AppGap.xs(axis: Axis.horizontal),
             LpIconButton(
@@ -127,6 +139,10 @@ class _LeadDetailScreenState extends ConsumerState<LeadDetailScreen> {
             ),
             const AppGap.md(),
             _PipelineStrip(leadId: lead.id),
+            if (lead.latestCall != null) ...[
+              const AppGap.md(),
+              LatestCallPanel(lead: lead, call: lead.latestCall!),
+            ],
             const AppGap.md(),
             CallHistoryPanel(
               leadId: lead.id,
@@ -145,6 +161,63 @@ class _LeadDetailScreenState extends ConsumerState<LeadDetailScreen> {
         ),
       ),
     );
+  }
+
+  /// Mark/unmark this contact as a customer.
+  ///
+  /// Confirmed before UNMARKING only: making someone a client is trivially
+  /// reversible, but silently dropping a customer relationship (and the date
+  /// it started, which is not recoverable) is not.
+  Future<void> _toggleClient(Lead lead) async {
+    final messenger = ScaffoldMessenger.of(context);
+    if (lead.isClient) {
+      final confirmed = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('Remove client status?'),
+          content: Text(
+            '${lead.name} will go back to being a regular lead. '
+            'The date they became a client is not kept.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Cancel'),
+            ),
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('Remove'),
+            ),
+          ],
+        ),
+      );
+      if (confirmed != true) return;
+    }
+    try {
+      await ref
+          .read(leadsProvider.notifier)
+          .setClient(lead.id, !lead.isClient);
+      if (!mounted) return;
+      messenger.showSnackBar(
+        SnackBar(
+          content: Text(
+            lead.isClient
+                ? '${lead.name} is no longer marked as a client'
+                : '${lead.name} is now a client',
+          ),
+        ),
+      );
+    } on ApiException catch (e) {
+      if (!mounted) return;
+      messenger.showSnackBar(
+        SnackBar(content: Text(e.message)),
+      );
+    } catch (_) {
+      if (!mounted) return;
+      messenger.showSnackBar(
+        const SnackBar(content: Text("Couldn't update customer status")),
+      );
+    }
   }
 
   /// Backend call history plus locally-recorded calls for this lead, newest
@@ -1172,6 +1245,19 @@ class CallHistoryPanel extends StatelessWidget {
                             ],
                           ),
                         ),
+                        // A recording exists for this call — tapping the row
+                        // opens Call Detail, where the player lives. Marked
+                        // here so the telecaller can see at a glance which
+                        // calls they can actually listen back to.
+                        if (history[i].hasAudio) ...[
+                          const Icon(
+                            Icons.play_circle_outline,
+                            size: 18,
+                            color: AppColors.greenHaze,
+                            semanticLabel: 'Recording available',
+                          ),
+                          const SizedBox(width: 6),
+                        ],
                         LpPill(
                           label: '${history[i].score} pts',
                           foreground: AppColors.salem,
@@ -1194,4 +1280,188 @@ class CallHistoryPanel extends StatelessWidget {
       ),
     );
   }
+}
+
+
+// ─── Latest call (recording + that call's AI analysis) ───────────────────────
+
+/// The newest analysed call, shown directly under the lead's own details:
+/// the recording to listen back to, and what the AI heard on it.
+///
+/// Deliberately not a link into Call Detail alone — the telecaller about to
+/// dial wants the last call's objections and commitments on THIS screen,
+/// without a round trip through another page. "View full analysis" is still
+/// there for the transcript and score breakdown.
+class LatestCallPanel extends StatelessWidget {
+  const LatestCallPanel({super.key, required this.lead, required this.call});
+
+  final Lead lead;
+  final LatestCall call;
+
+  @override
+  Widget build(BuildContext context) {
+    final when = call.timestamp;
+    final meta = <String>[
+      if (when != null) DateFormat('d MMM, h:mm a').format(when.toLocal()),
+      if (call.durationLabel != null) call.durationLabel!,
+      if (call.autoCaptured) 'auto-captured',
+    ].join(' · ');
+
+    return SectionPanel(
+      title: 'Latest Call',
+      icon: Icons.graphic_eq,
+      trailing: call.score != null
+          ? Text('${call.score}/100', style: AppText.mono(size: 12))
+          : null,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          if (meta.isNotEmpty) ...[
+            const AppGap.xs(),
+            Text(
+              meta,
+              style: AppText.body13.copyWith(color: AppColors.schooner),
+            ),
+          ],
+          const AppGap.xs(),
+          Wrap(
+            spacing: 5,
+            runSpacing: 5,
+            children: [
+              if (call.leadVerdict != null)
+                LpPill(
+                  label: call.leadVerdict!,
+                  foreground: AppColors.governorBay,
+                  background: AppColors.zircon,
+                  border: AppColors.periwinkle,
+                ),
+              if (call.sentimentLabel != null)
+                LpPill(
+                  label: call.sentimentLabel!,
+                  foreground: AppColors.schooner,
+                  background: AppColors.pampas,
+                  border: AppColors.westar,
+                ),
+            ],
+          ),
+
+          // Only build a player where a recording actually exists — otherwise
+          // it would fetch, 404, and show an error for a call that simply was
+          // never recorded.
+          const AppGap.sm(),
+          if (call.hasAudio)
+            CallRecordingPlayer(callId: call.callId, compact: true)
+          else
+            Text(
+              'No recording was captured for this call.',
+              style: AppText.body13.copyWith(color: AppColors.schooner),
+            ),
+
+          if (call.headline != null && call.headline!.isNotEmpty) ...[
+            const AppGap.sm(),
+            Text(call.headline!, style: AppText.body14),
+          ],
+
+          if (call.keyPoints.isNotEmpty) ...[
+            const AppGap.sm(),
+            _MiniHeading('What the AI heard'),
+            for (final point in call.keyPoints) _Bullet(text: point),
+          ],
+
+          if (call.objectionsRaised.isNotEmpty) ...[
+            const AppGap.sm(),
+            _MiniHeading('Objections raised'),
+            for (final o in call.objectionsRaised)
+              _Chip(text: o, background: AppColors.pampas),
+          ],
+
+          if (call.commitmentsMade.isNotEmpty) ...[
+            const AppGap.sm(),
+            _MiniHeading('Commitments made'),
+            for (final c in call.commitmentsMade)
+              _Chip(text: c, background: AppColors.foam),
+          ],
+
+          if (call.nextSteps.isNotEmpty) ...[
+            const AppGap.sm(),
+            _MiniHeading('Recommended next steps'),
+            for (var i = 0; i < call.nextSteps.length; i++)
+              _Bullet(text: call.nextSteps[i], marker: '${i + 1}.'),
+          ],
+
+          const AppGap.sm(),
+          SecondaryButton(
+            label: 'View full analysis',
+            icon: Icons.assessment_outlined,
+            onTap: () => context.push(
+              '/calls/${call.callId}',
+              extra: CallDetailArgs(
+                leadName: lead.name,
+                calledAt: call.timestamp,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _MiniHeading extends StatelessWidget {
+  const _MiniHeading(this.text);
+
+  final String text;
+
+  @override
+  Widget build(BuildContext context) => Padding(
+    padding: const EdgeInsets.only(bottom: 4),
+    child: Text(
+      text.toUpperCase(),
+      style: AppText.label11.copyWith(color: AppColors.schooner),
+    ),
+  );
+}
+
+class _Bullet extends StatelessWidget {
+  const _Bullet({required this.text, this.marker = '\u2022'});
+
+  final String text;
+  final String marker;
+
+  @override
+  Widget build(BuildContext context) => Padding(
+    padding: const EdgeInsets.only(bottom: 3),
+    child: Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        SizedBox(
+          width: 18,
+          child: Text(
+            marker,
+            style: AppText.body13.copyWith(color: AppColors.schooner),
+          ),
+        ),
+        Expanded(child: Text(text, style: AppText.body13)),
+      ],
+    ),
+  );
+}
+
+class _Chip extends StatelessWidget {
+  const _Chip({required this.text, required this.background});
+
+  final String text;
+  final Color background;
+
+  @override
+  Widget build(BuildContext context) => Container(
+    width: double.infinity,
+    margin: const EdgeInsets.only(bottom: 4),
+    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
+    decoration: BoxDecoration(
+      color: background,
+      borderRadius: BorderRadius.circular(AppRadius.sm),
+    ),
+    child: Text(text, style: AppText.body13),
+  );
 }

@@ -10,6 +10,7 @@ import '../state/providers.dart';
 import '../theme/app_colors.dart';
 import '../theme/app_theme.dart';
 import '../widgets/leadpilot_widgets.dart';
+import '../widgets/recording_required_dialog.dart';
 import 'lead_detail_screen.dart';
 
 class PreCallScreen extends ConsumerStatefulWidget {
@@ -85,6 +86,10 @@ class _PreCallScreenState extends ConsumerState<PreCallScreen> {
                 label: 'Start Call',
                 icon: Icons.phone_outlined,
                 onTap: () async {
+                  // Same gate as the Inbox quick-call: no recording, no call.
+                  if (!await ensureCallCanBeRecorded(context)) return;
+                  if (!context.mounted) return;
+
                   final lastCall = lead.history.isNotEmpty
                       ? lead.history.first
                       : null;

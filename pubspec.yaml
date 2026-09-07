@@ -53,7 +53,18 @@ dependencies:
   firebase_messaging: ^16.5.0
   device_info_plus: ^11.5.0
   flutter_svg: ^2.2.4
+  # Call-recording playback. just_audio (not audioplayers) because the audio
+  # endpoint requires an Authorization header, and this is the player that lets
+  # an AudioSource carry request headers — the file is streamed, not
+  # pre-downloaded.
+  just_audio: ^0.9.42
+  # Writing a saved lead into the phone's address book, so the telecaller sees
+  # a NAME instead of an unknown number when that lead rings back — which also
+  # makes the auto-detected-call matching legible to them.
+  flutter_contacts: ^1.1.9
   package_info_plus: ^8.1.2
+  sqflite: ^2.4.3
+  path: ^1.9.1
 
 dev_dependencies:
   flutter_test:
@@ -65,6 +76,7 @@ dev_dependencies:
   # package. See that file for information about deactivating specific lint
   # rules and activating additional ones.
   flutter_lints: ^6.0.0
+  sqflite_common_ffi: ^2.4.2+1
 
 # For information on the generic Dart part of this file, see the
 # following page: https://dart.dev/tools/pub/pubspec

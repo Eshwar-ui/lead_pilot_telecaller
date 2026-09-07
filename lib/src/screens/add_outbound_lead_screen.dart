@@ -14,6 +14,7 @@ import '../models/lead.dart';
 import '../services/local_upload_ledger.dart';
 import '../services/local_upload_outbox.dart';
 import '../services/upload_error_copy.dart';
+import '../services/device_contact_service.dart';
 import '../state/providers.dart';
 import '../theme/app_colors.dart';
 import '../theme/app_theme.dart';
@@ -382,6 +383,20 @@ class _AddOutboundLeadScreenState extends ConsumerState<AddOutboundLeadScreen> {
     try {
       final key = await ref.read(leadRepositoryProvider).createLead(draft);
       ref.read(leadsProvider.notifier).refresh();
+
+      // Put the lead in the phone's address book so it rings in by NAME.
+      //
+      // Deliberately AFTER the lead is persisted and deliberately non-fatal:
+      // the lead is already saved by this point, so a denied permission or a
+      // contacts provider that throws must never read as "the lead failed".
+      // Awaited rather than fired-and-forgotten so the one-time permission
+      // dialog appears over THIS screen instead of over whatever we navigate
+      // to next.
+      final outcome = await ref
+          .read(deviceContactServiceProvider)
+          .saveLead(name: draft.name, phone: _phoneController.text);
+      if (outcome.isNoteworthy) _toast(outcome.message!);
+
       return key;
     } on ApiException catch (e) {
       if (e.isConflict) {

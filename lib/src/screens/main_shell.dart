@@ -9,7 +9,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../services/auto_capture_settings.dart';
 import '../services/call_actions.dart';
 import '../services/call_detection_bridge.dart';
-import '../services/permission_bootstrap.dart';
+import '../services/app_permissions.dart';
 import '../state/call_capture.dart';
 import '../state/providers.dart';
 import '../theme/app_colors.dart';
@@ -17,6 +17,7 @@ import '../theme/app_theme.dart';
 import 'home_screen.dart';
 import 'calls_screen.dart';
 import 'follow_ups_screen.dart';
+import 'permissions_screen.dart';
 import 'profile_screen.dart';
 
 /// What the Android back button should do while the tab shell is showing.
@@ -67,17 +68,25 @@ class _MainShellState extends ConsumerState<MainShell>
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    // Onboarding no longer runs before this screen, so request phone +
-    // notification access here instead, as soon as the dashboard opens.
-    WidgetsBinding.instance.addPostFrameCallback(
-      (_) => PermissionBootstrap.requestStartup(),
-    );
+    // Two permissions used to be requested silently here, with the rest
+    // sprung on the telecaller mid-task and none of them ever explained. Now
+    // the full list is shown up front with a reason against each — and shown
+    // again on every launch while anything is still missing, since a
+    // half-granted phone silently loses recordings and reminders. The screen
+    // is dismissable, so this can never lock anyone out.
+    WidgetsBinding.instance.addPostFrameCallback((_) => _promptForPermissions());
   }
 
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     super.dispose();
+  }
+
+  Future<void> _promptForPermissions() async {
+    final missing = await const AppPermissions().missing();
+    if (missing.isEmpty || !mounted) return;
+    await PermissionsScreen.show(context);
   }
 
   @override

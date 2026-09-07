@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_app_utilities/flutter_app_utilities.dart'
     hide AppSpacing, AppRadius;
@@ -6,6 +8,7 @@ import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 
 import '../models/lead.dart';
+import '../services/local_call_store.dart';
 import '../state/providers.dart';
 import '../theme/app_colors.dart';
 import '../theme/app_spacing.dart';
@@ -28,32 +31,54 @@ class _CallsScreenState extends ConsumerState<CallsScreen> {
   /// 'All' | 'Inbound' | 'Outbound'.
   String _direction = 'All';
 
+  /// Searching now runs in SQLite across the whole log (a LIKE over every row)
+  /// rather than over a list already in memory, so firing on each keystroke
+  /// would scan the table five times to answer "priya". Matches the debounce
+  /// the outbound-lead dedupe check uses.
+  Timer? _searchDebounce;
+
   static const _directions = ['All', 'Inbound', 'Outbound'];
 
   @override
   void dispose() {
+    _searchDebounce?.cancel();
     _searchController.dispose();
     super.dispose();
   }
 
+  /// The filter the list and the tiles are both built from. Kept as one value
+  /// so they can never disagree about which calls they describe.
+  CallLogFilter get _filter => CallLogFilter(
+    isInbound: _direction == 'All' ? null : _direction == 'Inbound',
+    query: _query,
+  );
+
+  /// Pushes the current filter down to the paging controller, which reloads
+  /// from the first page. Direction changes and clearing the box apply at
+  /// once; typing waits for a pause.
+  void _applyFilter({bool debounce = false}) {
+    _searchDebounce?.cancel();
+    if (!debounce) {
+      ref.read(localCallsProvider.notifier).setFilter(_filter);
+      return;
+    }
+    _searchDebounce = Timer(const Duration(milliseconds: 300), () {
+      if (mounted) ref.read(localCallsProvider.notifier).setFilter(_filter);
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
-    final allCalls = ref.watch(callLogProvider);
-    final loading = ref.watch(leadsLoadingProvider) && allCalls.isEmpty;
+    // Filtering and searching happen in SQL over the whole log now — the list
+    // in memory is one page of it, so narrowing that page would only ever
+    // search the calls that happen to be loaded.
+    final page = ref.watch(localCallsProvider);
+    final callLog = page.entries;
+    final loading = ref.watch(leadsLoadingProvider) && callLog.isEmpty;
     final q = _query.trim().toLowerCase();
-    var callLog = q.isEmpty
-        ? allCalls
-        : allCalls
-              .where(
-                (e) =>
-                    e.leadName.toLowerCase().contains(q) ||
-                    e.phone.toLowerCase().contains(q),
-              )
-              .toList();
-    if (_direction != 'All') {
-      final wantInbound = _direction == 'Inbound';
-      callLog = callLog.where((e) => e.isInbound == wantInbound).toList();
-    }
+    final stats =
+        ref.watch(filteredCallLogStatsProvider(_filter)).value ??
+        const CallLogStats();
     final syncState = ref.watch(callLogSyncProvider);
     final leadCalls = [
       for (final entry in callLog)
@@ -63,8 +88,8 @@ class _CallsScreenState extends ConsumerState<CallsScreen> {
       for (final entry in callLog)
         if (entry.leadId == null) entry,
     ];
-    final allLeadCalls = allCalls.where((entry) => entry.leadId != null).length;
-    final allPhoneLogCalls = allCalls.length - allLeadCalls;
+    final allLeadCalls = stats.leadCallTotal;
+    final allPhoneLogCalls = stats.phoneLogTotal;
 
     return Scaffold(
       backgroundColor: AppColors.springWood,
@@ -90,6 +115,7 @@ class _CallsScreenState extends ConsumerState<CallsScreen> {
                     if (!_searching) {
                       _searchController.clear();
                       _query = '';
+                      _applyFilter();
                     }
                   }),
                 ),
@@ -131,7 +157,10 @@ class _CallsScreenState extends ConsumerState<CallsScreen> {
                         child: TextField(
                           controller: _searchController,
                           autofocus: true,
-                          onChanged: (v) => setState(() => _query = v),
+                          onChanged: (v) {
+                            setState(() => _query = v);
+                            _applyFilter(debounce: true);
+                          },
                           style: AppText.body14.copyWith(color: AppColors.zeus),
                           decoration: InputDecoration(
                             isCollapsed: true,
@@ -155,27 +184,11 @@ class _CallsScreenState extends ConsumerState<CallsScreen> {
               padding: const EdgeInsets.symmetric(horizontal: 16),
               child: Builder(
                 builder: (_) {
-                  final now = DateTime.now();
-                  final thisMonth = callLog
-                      .where(
-                        (e) =>
-                            e.calledAt.year == now.year &&
-                            e.calledAt.month == now.month,
-                      )
-                      .toList();
-                  final avgScore = leadCalls.isEmpty
-                      ? 0
-                      : (leadCalls
-                                .map((e) => e.score)
-                                .fold(0, (a, b) => a + b) ~/
-                            leadCalls.length);
-                  final totalSecs = callLog.fold(
-                    0,
-                    (a, e) => a + e.duration.inSeconds,
-                  );
-                  final avgSecs = callLog.isEmpty
-                      ? 0
-                      : totalSecs ~/ callLog.length;
+                  // All three now come from SQL over every matching row, not
+                  // from the page in memory — otherwise "This Month" would
+                  // mean "this month, among the last 60 calls".
+                  final avgScore = stats.averageLeadScore ?? 0;
+                  final avgSecs = stats.averageDuration?.inSeconds ?? 0;
                   final avgDur =
                       '${(avgSecs ~/ 60).toString().padLeft(2, '0')}:${(avgSecs % 60).toString().padLeft(2, '0')}';
                   return Row(
@@ -183,7 +196,7 @@ class _CallsScreenState extends ConsumerState<CallsScreen> {
                       Expanded(
                         child: MetricTile(
                           label: 'This Month',
-                          value: '${thisMonth.length}',
+                          value: '${stats.thisMonth}',
                           mono: true,
                         ),
                       ),
@@ -191,7 +204,7 @@ class _CallsScreenState extends ConsumerState<CallsScreen> {
                       Expanded(
                         child: MetricTile(
                           label: 'Lead Score',
-                          value: leadCalls.isEmpty ? '—' : '$avgScore',
+                          value: stats.leadCallTotal == 0 ? '—' : '$avgScore',
                           valueColor: AppColors.salem,
                           mono: true,
                         ),
@@ -200,7 +213,7 @@ class _CallsScreenState extends ConsumerState<CallsScreen> {
                       Expanded(
                         child: MetricTile(
                           label: 'Avg Duration',
-                          value: callLog.isEmpty ? '—' : avgDur,
+                          value: stats.total == 0 ? '—' : avgDur,
                           mono: true,
                         ),
                       ),
@@ -213,61 +226,110 @@ class _CallsScreenState extends ConsumerState<CallsScreen> {
             const SizedBox(height: AppSpacing.sm),
 
             // ── Call list ─────────────────────────────────────────────────
+            // Slivers rather than ListView(children:): this screen merges the
+            // lead calls with the device's ENTIRE phone call log, making it
+            // the longest list in the app. A non-lazy list builds, lays out
+            // and retains a tile for every row at once regardless of what is
+            // on screen — on the 4 GB phones telecallers are issued that is
+            // both a jank on tab switch and a large permanently-retained
+            // element tree.
             Expanded(
-              child: ListView(
-                padding: const EdgeInsets.fromLTRB(16, 4, 16, 100),
-                children: [
-                  if (loading) ...[
-                    for (var i = 0; i < 5; i++) const _CallTileSkeleton(),
-                  ] else if (callLog.isEmpty)
-                    Padding(
-                      padding: const EdgeInsets.only(top: 60),
-                      child: Column(
-                        children: [
-                          const Icon(
-                            Icons.call_outlined,
-                            size: 40,
-                            color: AppColors.tide,
-                          ),
-                          const SizedBox(height: 8),
-                          Text(
-                            q.isEmpty ? 'No calls yet' : 'No matching calls',
-                            style: AppText.body14.copyWith(
-                              color: AppColors.schooner,
-                              fontWeight: FontWeight.w600,
+              child: CustomScrollView(
+                slivers: [
+                  if (loading)
+                    SliverPadding(
+                      padding: const EdgeInsets.fromLTRB(16, 4, 16, 0),
+                      sliver: SliverList.builder(
+                        itemCount: 5,
+                        itemBuilder: (_, _) => const _CallTileSkeleton(),
+                      ),
+                    )
+                  else if (callLog.isEmpty)
+                    SliverToBoxAdapter(
+                      child: Padding(
+                        padding: const EdgeInsets.only(top: 60),
+                        child: Column(
+                          children: [
+                            const Icon(
+                              Icons.call_outlined,
+                              size: 40,
+                              color: AppColors.tide,
+                            ),
+                            const SizedBox(height: 8),
+                            Text(
+                              q.isEmpty ? 'No calls yet' : 'No matching calls',
+                              style: AppText.body14.copyWith(
+                                color: AppColors.schooner,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                            const SizedBox(height: 4),
+                            Text(
+                              q.isEmpty
+                                  ? 'Lead calls and device call logs will appear here'
+                                  : 'Try a different search',
+                              style: AppText.caption11,
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  if (leadCalls.isNotEmpty)
+                    SliverPadding(
+                      padding: const EdgeInsets.fromLTRB(16, 4, 16, 0),
+                      sliver: SliverMainAxisGroup(
+                        slivers: [
+                          SliverToBoxAdapter(
+                            child: _CallGroupHeader(
+                              icon: Icons.insights_outlined,
+                              title: 'Lead calls',
+                              subtitle: 'Calls linked to a lead',
+                              count: leadCalls.length,
                             ),
                           ),
-                          const SizedBox(height: 4),
-                          Text(
-                            q.isEmpty
-                                ? 'Lead calls and device call logs will appear here'
-                                : 'Try a different search',
-                            style: AppText.caption11,
+                          SliverList.builder(
+                            itemCount: leadCalls.length,
+                            itemBuilder: (_, i) =>
+                                _LeadCallTile(entry: leadCalls[i]),
                           ),
                         ],
                       ),
                     ),
-                  if (leadCalls.isNotEmpty) ...[
-                    _CallGroupHeader(
-                      icon: Icons.insights_outlined,
-                      title: 'Lead calls',
-                      subtitle: 'Calls linked to a lead',
-                      count: leadCalls.length,
+                  if (phoneLogCalls.isNotEmpty)
+                    SliverPadding(
+                      padding: EdgeInsets.fromLTRB(
+                        16,
+                        leadCalls.isEmpty ? 4 : AppSpacing.md,
+                        16,
+                        0,
+                      ),
+                      sliver: SliverMainAxisGroup(
+                        slivers: [
+                          SliverToBoxAdapter(
+                            child: _CallGroupHeader(
+                              icon: Icons.history_rounded,
+                              title: 'Phone call log',
+                              subtitle: 'Calls captured from this device',
+                              count: phoneLogCalls.length,
+                            ),
+                          ),
+                          SliverList.builder(
+                            itemCount: phoneLogCalls.length,
+                            itemBuilder: (_, i) =>
+                                _PhoneCallLogTile(entry: phoneLogCalls[i]),
+                          ),
+                        ],
+                      ),
                     ),
-                    for (final entry in leadCalls) _LeadCallTile(entry: entry),
-                  ],
-                  if (phoneLogCalls.isNotEmpty) ...[
-                    if (leadCalls.isNotEmpty)
-                      const SizedBox(height: AppSpacing.md),
-                    _CallGroupHeader(
-                      icon: Icons.history_rounded,
-                      title: 'Phone call log',
-                      subtitle: 'Calls captured from this device',
-                      count: phoneLogCalls.length,
+                  if (page.hasMore)
+                    SliverToBoxAdapter(
+                      child: _LoadMoreSentinel(
+                        onReached: () =>
+                            ref.read(localCallsProvider.notifier).loadMore(),
+                      ),
                     ),
-                    for (final entry in phoneLogCalls)
-                      _PhoneCallLogTile(entry: entry),
-                  ],
+                  // Clears the bottom tab bar, as the old list padding did.
+                  const SliverToBoxAdapter(child: SizedBox(height: 100)),
                 ],
               ),
             ),
@@ -316,6 +378,7 @@ class _CallsScreenState extends ConsumerState<CallsScreen> {
                 TapScale(
                   onTap: () {
                     setState(() => _direction = d);
+                    _applyFilter();
                     Navigator.of(sheetContext).pop();
                   },
                   child: Container(
@@ -706,6 +769,16 @@ class _LeadCallTile extends StatelessWidget {
                           background: AppColors.ribbonSurface,
                           border: AppColors.ribbonBorder,
                         ),
+                      // Keyed off hasAudio, not callId: a call can be analysed
+                      // with no reachable recording, and badging those would
+                      // promise playback that isn't there.
+                      if (entry.hasAudio)
+                        LpMiniPill(
+                          label: 'REC',
+                          foreground: AppColors.greenHaze,
+                          background: AppColors.foam,
+                          border: AppColors.iceCold,
+                        ),
                     ],
                   ),
                 ],
@@ -820,4 +893,48 @@ String _formatCallWhen(DateTime at) {
   if (difference == 1) return 'Yesterday, ${DateFormat('h:mm a').format(at)}';
   if (at.year == now.year) return DateFormat('d MMM, h:mm a').format(at);
   return DateFormat('d MMM yyyy, h:mm a').format(at);
+}
+
+
+/// Asks for the next page when it is built.
+///
+/// A lazy sliver is only built once it comes within the viewport's cache
+/// extent, which makes "this widget exists" a good enough proxy for "the
+/// telecaller has nearly scrolled to the end" — no scroll listener, no
+/// threshold arithmetic, and it works the same whether one page fills the
+/// screen or three do.
+class _LoadMoreSentinel extends StatefulWidget {
+  const _LoadMoreSentinel({required this.onReached});
+
+  final VoidCallback onReached;
+
+  @override
+  State<_LoadMoreSentinel> createState() => _LoadMoreSentinelState();
+}
+
+class _LoadMoreSentinelState extends State<_LoadMoreSentinel> {
+  @override
+  void initState() {
+    super.initState();
+    // After the frame: loading synchronously here would mutate a provider
+    // while the list that reads it is still building.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) widget.onReached();
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) => const Padding(
+    padding: EdgeInsets.symmetric(vertical: 18),
+    child: Center(
+      child: SizedBox(
+        width: 18,
+        height: 18,
+        child: CircularProgressIndicator(
+          strokeWidth: 2,
+          color: AppColors.tide,
+        ),
+      ),
+    ),
+  );
 }

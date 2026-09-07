@@ -439,8 +439,12 @@ class CallCaptureController extends Notifier<Map<String, CallCaptureState>> {
     _sweeping = true;
     try {
       final cutoff = DateTime.now().subtract(backfillWindow);
+      // Queried by time window rather than filtered out of the loaded page:
+      // the sweep's window is its own, and is not necessarily covered by
+      // whatever the Calls screen has scrolled into memory.
+      final recent = await ref.read(localCallStoreProvider).since(cutoff);
       final candidates = [
-        for (final e in ref.read(localCallsProvider))
+        for (final e in recent)
           // deviceCallId: only entries from the phone's real call log —
           // an app-placed call is already handled by PostCallScreen.
           // callId == null: not already uploaded.
@@ -448,8 +452,7 @@ class CallCaptureController extends Notifier<Map<String, CallCaptureState>> {
           // and scanning for one only produces noise in the telemetry.
           if (e.deviceCallId != null &&
               e.callId == null &&
-              e.duration > Duration.zero &&
-              e.calledAt.isAfter(cutoff))
+              e.duration > Duration.zero)
             e,
       ]..sort((a, b) => b.calledAt.compareTo(a.calledAt));
       if (candidates.isEmpty) return;

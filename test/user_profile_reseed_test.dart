@@ -4,7 +4,16 @@ import 'package:lead_pilot_telecaller/src/services/session_store.dart';
 import 'package:lead_pilot_telecaller/src/services/user_profile_store.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-// Regression cover for the user_profile_store race fix: UserProfileController
+// Cover for UserProfileController's two contracts:
+//
+//  1. The cold-start RACE fix (the original reason this file exists) — the
+//     controller listens to sessionProvider instead of reading it once.
+//  2. Identity is owned by the SERVER. name/role/company always follow the
+//     session and are never persisted locally, because the old "a local edit
+//     wins" rule meant a founder correcting a telecaller's name from the
+//     dashboard changed nothing on the device.
+//
+// Original race note: UserProfileController
 // used to seed identity from sessionProvider with a single one-time read
 // inside _load(), racing SessionController._restore() (both fire on cold
 // start) — if the session hadn't finished restoring yet, the profile seeded
@@ -65,9 +74,11 @@ void main() {
   });
 
   test(
-    'a session name is not applied once the user has personalised their own name',
+    'the server\'s name overrides a locally stored one — a founder\'s '
+    'correction must not be shadowed by an old local edit',
     () async {
-      // Pre-seed a stored profile with a real (non-placeholder) name.
+      // An install from before identity became server-owned still has a
+      // locally edited name in SharedPreferences. It is read, then overridden.
       SharedPreferences.setMockInitialValues({
         'user_profile_v1':
             '{"name":"My Own Name","role":"Telecaller","company":"","language":"తె","notifications_enabled":true}',
@@ -80,17 +91,43 @@ void main() {
       final sessionNotifier =
           container.read(sessionProvider.notifier) as _MutableFakeSession;
       sessionNotifier.setLoggedIn(
-        const Session(token: 'tok-123', name: 'Session Name'),
+        const Session(token: 'tok-123', name: 'Corrected By Founder'),
       );
       await pumpEventQueue();
 
       expect(
         container.read(userProfileProvider).name,
-        'My Own Name',
-        reason: "the user's own edited name must win over the session's",
+        'Corrected By Founder',
+        reason:
+            'identity is owned by the server; the old "local edit wins" rule '
+            'is exactly what made a founder\'s correction invisible here',
       );
     },
   );
+
+  test('preferences are still persisted locally, identity is not', () async {
+    final container = buildContainer();
+    container.read(userProfileProvider);
+    await pumpEventQueue();
+
+    await container
+        .read(userProfileProvider.notifier)
+        .update(
+          const UserProfile(
+            name: 'Should Not Persist',
+            language: 'हि',
+            notificationsEnabled: false,
+          ),
+        );
+
+    final prefs = await SharedPreferences.getInstance();
+    final stored = prefs.getString('user_profile_v1')!;
+    expect(stored, contains('हि'));
+    expect(stored, contains('notifications_enabled'));
+    // The whole point: a name can no longer be written to the device and
+    // outlive a change made on the server.
+    expect(stored, isNot(contains('Should Not Persist')));
+  });
 
   test(
     'logging out (session goes empty again) does not clobber the seeded name',

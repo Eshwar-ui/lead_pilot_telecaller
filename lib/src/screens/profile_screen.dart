@@ -18,6 +18,7 @@ import '../theme/app_theme.dart';
 import '../widgets/edit_profile_sheet.dart';
 import '../widgets/leadpilot_widgets.dart';
 import '../widgets/organization_logo.dart';
+import 'permissions_screen.dart';
 
 /// The real installed version/build number — was previously a hardcoded
 /// string in this screen that never matched the actual shipped build.
@@ -26,26 +27,38 @@ final appVersionProvider = FutureProvider<String>((ref) async {
   return '${info.version} (build ${info.buildNumber})';
 });
 
-class ProfileScreen extends ConsumerWidget {
+class ProfileScreen extends ConsumerStatefulWidget {
   const ProfileScreen({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<ProfileScreen> createState() => _ProfileScreenState();
+}
+
+class _ProfileScreenState extends ConsumerState<ProfileScreen> {
+  @override
+  void initState() {
+    super.initState();
+    // Pull the authoritative user record on open, so a name or email the
+    // founder corrected from Manage Team shows here without the telecaller
+    // logging out. The session's own copy is a login-time snapshot.
+    // Fire-and-forget: it fails soft to the values already on screen.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      ref.read(userProfileProvider.notifier).refreshFromServer();
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final profile = ref.watch(userProfileProvider);
     final leads = ref.watch(leadsProvider);
-    final callLog = ref.watch(callLogProvider);
     final stages = ref.watch(leadStageProvider);
 
-    final now = DateTime.now();
-    final callsThisMonth = callLog
-        .where(
-          (e) => e.calledAt.year == now.year && e.calledAt.month == now.month,
-        )
-        .toList();
-    final scored = callLog.where((e) => e.score > 0).toList();
-    final avgScore = scored.isEmpty
-        ? null
-        : scored.map((e) => e.score).reduce((a, b) => a + b) ~/ scored.length;
+    // Over the entire log, in SQL — the call list itself is paged now, so
+    // filtering it here would only ever see the most recent page.
+    final callStats =
+        ref.watch(callLogStatsProvider).value ?? const CallLogStats();
+    final callsThisMonth = callStats.thisMonth;
+    final avgScore = callStats.averageScore;
     final qualified = leads
         .where((l) => l.temperature == LeadTemperature.hot)
         .length;
@@ -91,7 +104,7 @@ class ProfileScreen extends ConsumerWidget {
                             Expanded(
                               child: MetricTile(
                                 label: 'Calls Made',
-                                value: '${callsThisMonth.length}',
+                                value: '$callsThisMonth',
                                 mono: true,
                               ),
                             ),
@@ -162,6 +175,15 @@ class ProfileScreen extends ConsumerWidget {
                         icon: Icons.troubleshoot_outlined,
                         label: 'Recording Check',
                         onTap: () => context.push('/recording-check'),
+                      ),
+                      const Divider(height: 1, indent: 16, endIndent: 16),
+                      // The startup prompt is dismissable, so this is the way
+                      // back to anything declined then — with what each one is
+                      // actually for written next to it.
+                      _SettingsRow(
+                        icon: Icons.shield_outlined,
+                        label: 'Permissions',
+                        onTap: () => PermissionsScreen.show(context),
                       ),
                       const Divider(height: 1, indent: 16, endIndent: 16),
                       // Off by default and never enabled implicitly: this

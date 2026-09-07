@@ -38,6 +38,12 @@ class LeadPilotApp extends ConsumerWidget {
   }
 }
 
+/// Decode budget for the splash plate. See [OrganizationLogo] — Flutter caches
+/// images at their decoded size, so an uncapped decode of the 1095x975 mark
+/// costs ~4.3 MB to fill a 122 px box.
+int _splashDecodeWidth(BuildContext context) =>
+    (122 * MediaQuery.devicePixelRatioOf(context)).round();
+
 class _StartupScreen extends StatelessWidget {
   const _StartupScreen();
 
@@ -54,17 +60,18 @@ class _StartupScreen extends StatelessWidget {
                 label: 'Asan Innovators',
                 image: true,
                 child: Container(
-                  width: 190,
+                  width: 122,
                   height: 112,
                   padding: const EdgeInsets.all(14),
                   decoration: BoxDecoration(
-                    color: AppColors.zeus,
+                    color: AppColors.white,
                     borderRadius: BorderRadius.circular(24),
                     border: Border.all(color: AppColors.westar),
                   ),
                   child: Image.asset(
                     'assets/images/asan_logo.png',
                     fit: BoxFit.contain,
+                    cacheWidth: _splashDecodeWidth(context),
                   ),
                 ),
               ),

@@ -12,6 +12,35 @@ import '../widgets/leadpilot_widgets.dart';
 import '../widgets/schedule_call_sheet.dart';
 import '../widgets/shimmer.dart';
 
+/// The three numbers above the Follow-ups list.
+///
+/// Shared by the header line and the stat tiles so the two can never drift.
+/// "Due today" deliberately means exactly what the Today tab lists — every
+/// task scheduled for today that isn't done — rather than "everything not yet
+/// overdue", which is what it used to count: a tile reading 12 while the tab
+/// under it listed 2 was simply wrong, and it disagreed with the Inbox's own
+/// Follow-ups Due tile too.
+///
+/// A task that was due earlier today is counted in both `overdue` and
+/// `dueToday`. That overlap is deliberate — it is late AND it is today's
+/// work — and it keeps this number equal to the Today tab's length.
+({int overdue, int dueToday, int done}) followUpCounts(
+  List<FollowUpTask> tasks,
+) {
+  var overdue = 0;
+  var dueToday = 0;
+  var done = 0;
+  for (final task in tasks) {
+    if (task.status == FollowUpStatus.done) {
+      done++;
+      continue;
+    }
+    if (task.status == FollowUpStatus.overdue) overdue++;
+    if (task.dueToday) dueToday++;
+  }
+  return (overdue: overdue, dueToday: dueToday, done: done);
+}
+
 class FollowUpsScreen extends ConsumerStatefulWidget {
   const FollowUpsScreen({super.key});
 
@@ -110,9 +139,7 @@ class _FollowUpsScreenState extends ConsumerState<FollowUpsScreen>
     final tasks = ref.watch(followUpsProvider);
     final loading = ref.watch(followUpsLoadingProvider) && tasks.isEmpty;
 
-    final overdue = tasks.where((t) => t.status == FollowUpStatus.overdue).toList();
-    final pending = tasks.where((t) => t.status == FollowUpStatus.pending).toList();
-    final done = tasks.where((t) => t.status == FollowUpStatus.done).toList();
+    final counts = followUpCounts(tasks);
 
     return Scaffold(
       backgroundColor: AppColors.springWood,
@@ -128,15 +155,15 @@ class _FollowUpsScreenState extends ConsumerState<FollowUpsScreen>
                   style: AppText.body13.copyWith(color: AppColors.schooner),
                   children: [
                     TextSpan(
-                      text: '${overdue.length} overdue',
+                      text: '${counts.overdue} overdue',
                       style: TextStyle(
-                        color: overdue.isNotEmpty
+                        color: counts.overdue > 0
                             ? AppColors.alizarin
                             : AppColors.schooner,
                         fontWeight: FontWeight.w700,
                       ),
                     ),
-                    TextSpan(text: ' · ${pending.length} due today'),
+                    TextSpan(text: ' · ${counts.dueToday} due today'),
                   ],
                 ),
               ),
@@ -155,27 +182,39 @@ class _FollowUpsScreenState extends ConsumerState<FollowUpsScreen>
                   Expanded(
                     child: MetricTile(
                       label: 'Overdue',
-                      value: '${overdue.length}',
+                      value: '${counts.overdue}',
                       valueColor: AppColors.alizarin,
                       mono: true,
+                      info:
+                          'Follow-ups whose time has already passed and that '
+                          'you have not marked done. They stay here until you '
+                          'complete or delete them.',
                     ),
                   ),
                   const SizedBox(width: 6),
                   Expanded(
                     child: MetricTile(
                       label: 'Due Today',
-                      value: '${pending.length}',
+                      value: '${counts.dueToday}',
                       valueColor: AppColors.tahitiGold,
                       mono: true,
+                      info:
+                          'Follow-ups scheduled for today that you have not '
+                          'marked done — the same list the Today tab shows. '
+                          'Ones due earlier today are counted here as well as '
+                          'under Overdue.',
                     ),
                   ),
                   const SizedBox(width: 6),
                   Expanded(
                     child: MetricTile(
                       label: 'Done',
-                      value: '${done.length}',
+                      value: '${counts.done}',
                       valueColor: AppColors.salem,
                       mono: true,
+                      info:
+                          'Follow-ups you have marked complete. Marking one '
+                          'done also cancels its remaining reminders.',
                     ),
                   ),
                 ],

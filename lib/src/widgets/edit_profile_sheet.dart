@@ -1,14 +1,24 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../services/session_store.dart';
 import '../services/user_profile_store.dart';
 import '../theme/app_colors.dart';
 import '../theme/app_theme.dart';
-import 'leadpilot_widgets.dart';
 
-/// Bottom sheet to edit the telecaller's own display name. Role and company
-/// come from the assigned account and organisation, so they stay read-only.
-class EditProfileSheet extends ConsumerStatefulWidget {
+/// The telecaller's own details, shown read-only.
+///
+/// This used to edit the display name into SharedPreferences — a local copy
+/// that never reached the backend, so the app and the founder's dashboard
+/// quietly disagreed about who someone was, and a founder's correction was
+/// invisible here forever. The name/email now come from the server (the
+/// founder manages them from Manage Team), so this sheet's job is to SHOW
+/// them and say where they're changed.
+///
+/// Deliberately still reachable from the same Edit button: a telecaller who
+/// goes looking for "change my name" gets an answer at the moment they ask,
+/// rather than finding the control silently gone.
+class EditProfileSheet extends ConsumerWidget {
   const EditProfileSheet({super.key, required this.profile});
 
   final UserProfile profile;
@@ -25,53 +35,8 @@ class EditProfileSheet extends ConsumerStatefulWidget {
       );
 
   @override
-  ConsumerState<EditProfileSheet> createState() => _EditProfileSheetState();
-}
-
-class _EditProfileSheetState extends ConsumerState<EditProfileSheet> {
-  late final TextEditingController _name;
-  bool _saving = false;
-
-  @override
-  void initState() {
-    super.initState();
-    _name = TextEditingController(text: widget.profile.name);
-  }
-
-  @override
-  void dispose() {
-    _name.dispose();
-    super.dispose();
-  }
-
-  Future<void> _save() async {
-    if (_name.text.trim().isEmpty) {
-      ScaffoldMessenger.of(context)
-        ..clearSnackBars()
-        ..showSnackBar(const SnackBar(content: Text('Name is required')));
-      return;
-    }
-    setState(() => _saving = true);
-    try {
-      await ref
-          .read(userProfileProvider.notifier)
-          .update(widget.profile.copyWith(name: _name.text.trim()));
-      if (mounted) Navigator.of(context).pop();
-    } catch (_) {
-      if (mounted) {
-        ScaffoldMessenger.of(context)
-          ..clearSnackBars()
-          ..showSnackBar(
-            const SnackBar(content: Text('Could not save profile. Try again.')),
-          );
-      }
-    } finally {
-      if (mounted) setState(() => _saving = false);
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    final session = ref.watch(sessionProvider);
     return Padding(
       padding: EdgeInsets.only(
         left: 20,
@@ -94,71 +59,59 @@ class _EditProfileSheetState extends ConsumerState<EditProfileSheet> {
               ),
             ),
           ),
-          Text('Edit profile', style: AppText.display20.copyWith(fontSize: 18)),
+          Text('Your details', style: AppText.display20.copyWith(fontSize: 18)),
           const SizedBox(height: 4),
           Text(
-            'Update the name shown in this app.',
+            'These come from your organisation. Ask your founder to update them '
+            'from Manage Team.',
             style: AppText.body13.copyWith(color: AppColors.schooner),
           ),
-          const SizedBox(height: 16),
-          _Field(label: 'Name', controller: _name),
-          const SizedBox(height: 22),
-          SizedBox(
-            width: double.infinity,
-            child: PrimaryButton(
-              label: 'Save profile',
-              icon: Icons.check,
-              onTap: _save,
-              loading: _saving,
-            ),
+          const SizedBox(height: 18),
+          _ReadOnlyRow(label: 'Name', value: profile.name),
+          _ReadOnlyRow(label: 'Email', value: session.email ?? '—'),
+          _ReadOnlyRow(label: 'Role', value: profile.role),
+          if (profile.company.isNotEmpty)
+            _ReadOnlyRow(label: 'Organisation', value: profile.company),
+          const SizedBox(height: 8),
+          Text(
+            'Your email is also how you sign in, so it changes only when your '
+            'founder changes it.',
+            style: AppText.caption11.copyWith(color: AppColors.tide),
           ),
+          const SizedBox(height: 20),
         ],
       ),
     );
   }
 }
 
-class _Field extends StatelessWidget {
-  const _Field({required this.label, required this.controller});
+class _ReadOnlyRow extends StatelessWidget {
+  const _ReadOnlyRow({required this.label, required this.value});
 
   final String label;
-  final TextEditingController controller;
+  final String value;
 
   @override
   Widget build(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          label,
-          style: AppText.body14.copyWith(
-            fontWeight: FontWeight.w700,
-            color: AppColors.merlin,
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 14),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            label,
+            style: AppText.caption11.copyWith(color: AppColors.schooner),
           ),
-        ),
-        const SizedBox(height: 6),
-        TextField(
-          controller: controller,
-          style: AppText.body14.copyWith(fontSize: 15, color: AppColors.zeus),
-          decoration: InputDecoration(
-            isDense: true,
-            filled: true,
-            fillColor: AppColors.pampas,
-            contentPadding: const EdgeInsets.symmetric(
-              horizontal: 15,
-              vertical: 14,
-            ),
-            enabledBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(8),
-              borderSide: const BorderSide(color: AppColors.westar),
-            ),
-            focusedBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(8),
-              borderSide: const BorderSide(color: AppColors.blueRibbon),
+          const SizedBox(height: 3),
+          Text(
+            value.isEmpty ? '—' : value,
+            style: AppText.body14.copyWith(
+              fontWeight: FontWeight.w700,
+              color: AppColors.merlin,
             ),
           ),
-        ),
-      ],
+        ],
+      ),
     );
   }
 }

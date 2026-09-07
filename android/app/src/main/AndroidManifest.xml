@@ -36,6 +36,15 @@
         android:name="android.permission.READ_EXTERNAL_STORAGE"
         android:maxSdkVersion="32" />
     <uses-permission android:name="android.permission.READ_MEDIA_AUDIO" />
+    <!-- Save a lead the telecaller creates into the phone's address book, so
+         that lead's NAME shows in the system dialer when they ring back
+         instead of an unknown number. READ is needed too: the write dedupes
+         against the existing contact for that number, so re-saving a lead
+         updates one card rather than spawning a second.
+         Google Play reviews WRITE_CONTACTS — a permission declaration is
+         required on the release that ships this. -->
+    <uses-permission android:name="android.permission.READ_CONTACTS" />
+    <uses-permission android:name="android.permission.WRITE_CONTACTS" />
 
     <!-- Local notifications (follow-up call reminders) -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
@@ -80,6 +89,17 @@
         <meta-data
             android:name="flutterEmbedding"
             android:value="2" />
+        <!-- Status-bar icon + accent for pushes that arrive without an
+             explicit android notification config (see
+             backend app/utils/push_notifications.py, which sends a bare
+             `messaging.Notification`). Must be a white-on-transparent
+             silhouette: Android throws the icon's colours away. -->
+        <meta-data
+            android:name="com.google.firebase.messaging.default_notification_icon"
+            android:resource="@drawable/ic_stat_notification" />
+        <meta-data
+            android:name="com.google.firebase.messaging.default_notification_color"
+            android:resource="@color/notification_accent" />
         <!-- flutter_local_notifications: required for scheduled (exact-alarm) notifications -->
         <receiver
             android:name="com.dexterous.flutterlocalnotifications.ScheduledNotificationReceiver"

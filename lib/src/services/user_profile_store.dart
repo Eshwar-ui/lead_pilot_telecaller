@@ -3,9 +3,17 @@ import 'dart:convert';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../state/providers.dart';
 import 'session_store.dart';
 
-/// The telecaller's own profile, edited in-app and persisted locally.
+/// The telecaller's profile as shown on the Profile screen.
+///
+/// IDENTITY (name/role/company) is NOT editable here and NOT persisted
+/// locally — it mirrors the authenticated session, which mirrors the server.
+/// It used to be a local SharedPreferences copy the telecaller could edit,
+/// which meant a founder correcting their name from the dashboard changed
+/// nothing on the device: the stale local value shadowed the server's forever.
+/// Only genuine device preferences (language, notifications) are stored here.
 class UserProfile {
   const UserProfile({
     this.name = 'Telecaller',
@@ -43,10 +51,10 @@ class UserProfile {
     notificationsEnabled: j['notifications_enabled'] as bool? ?? true,
   );
 
+  /// Only the device-local PREFERENCES are persisted. name/role/company are
+  /// deliberately absent: they're re-derived from the session on every load,
+  /// so a stale copy can never outlive a change made on the server.
   Map<String, dynamic> toJson() => {
-    'name': name,
-    'role': role,
-    'company': company,
     'language': language,
     'notifications_enabled': notificationsEnabled,
   };
@@ -101,30 +109,40 @@ class UserProfileController extends Notifier<UserProfile> {
     _reseedFromSession(ref.read(sessionProvider));
   }
 
-  /// Seed identity from the authenticated session when the user hasn't
-  /// personalised their profile yet (still the "Telecaller" placeholder), so
-  /// the card shows who they actually logged in as — not a default. Once the
-  /// user edits their profile, their chosen values win. A no-op on logout
-  /// (session fields all empty, so every `isNotEmpty` check is false).
+  /// Take identity from the authenticated session — ALWAYS, not just while the
+  /// local value is still a placeholder.
+  ///
+  /// The previous "only if unset" rule is exactly what made a founder's
+  /// correction invisible: once the telecaller had edited their own name, the
+  /// local value won permanently and the server's name was never shown again.
+  /// The session is refreshed from `GET /api/auth/me` when the Profile screen
+  /// opens, so this reflects an edit made on the dashboard.
+  ///
+  /// A no-op on logout: the session's fields are all empty then, and each
+  /// falls back to the current value rather than blanking the card mid-teardown.
   void _reseedFromSession(Session session) {
     final sessionName = session.name?.trim() ?? '';
     final sessionRole = _prettyRole(session.role);
     final sessionCompany = session.orgName?.trim() ?? '';
     state = state.copyWith(
-      name:
-          (state.name.isEmpty || state.name == 'Telecaller') &&
-              sessionName.isNotEmpty
-          ? sessionName
-          : state.name,
-      role:
-          (state.role.isEmpty || state.role == 'Telecaller') &&
-              sessionRole.isNotEmpty
-          ? sessionRole
-          : state.role,
-      company: state.company.isEmpty && sessionCompany.isNotEmpty
-          ? sessionCompany
-          : state.company,
+      name: sessionName.isNotEmpty ? sessionName : state.name,
+      role: sessionRole.isNotEmpty ? sessionRole : state.role,
+      company: sessionCompany.isNotEmpty ? sessionCompany : state.company,
     );
+  }
+
+  /// Pull the authoritative user record and fold it into the session, so a
+  /// name/email the founder changed on the dashboard appears here without the
+  /// telecaller logging out. Fail-soft: on any error the card simply keeps
+  /// showing the session's existing (login-time) values.
+  Future<void> refreshFromServer() async {
+    if (!ref.read(sessionProvider).isLoggedIn) return;
+    try {
+      final user = await ref.read(orgProfileRepositoryProvider).me();
+      await ref.read(sessionProvider.notifier).refreshIdentity(user);
+    } catch (_) {
+      /* offline or backend down — keep what we have */
+    }
   }
 
   /// "telecaller" -> "Telecaller", "ad_manager" -> "Ad Manager".
@@ -137,6 +155,9 @@ class UserProfileController extends Notifier<UserProfile> {
         .join(' ');
   }
 
+  /// Persist a PREFERENCE change (language, notifications). Identity fields on
+  /// `profile` are ignored on the way to storage — see [UserProfile.toJson] —
+  /// and re-derived from the session on the next load.
   Future<void> update(UserProfile profile) async {
     state = profile;
     await ref.read(userProfileStoreProvider).save(profile);

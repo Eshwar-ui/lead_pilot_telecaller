@@ -51,4 +51,16 @@ class OrgProfileRepository {
     }
     return OrgProfile.fromJson(body);
   }
+
+  /// `GET /api/auth/me` — the authoritative user record, as opposed to the
+  /// copy embedded in the session at login. Returned raw because
+  /// [SessionController.refreshIdentity] persists it in the same shape it
+  /// already stores.
+  Future<Map<String, dynamic>> me() async {
+    final body = await _client.get(ApiEndpoints.me);
+    if (body is! Map<String, dynamic>) {
+      throw ApiException('Unexpected /api/auth/me payload');
+    }
+    return body;
+  }
 }

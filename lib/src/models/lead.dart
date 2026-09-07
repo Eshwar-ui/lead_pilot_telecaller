@@ -163,6 +163,9 @@ class Lead {
     this.pendingCommitments = const [],
     this.addedByName,
     this.addedByRole,
+    this.isClient = false,
+    this.clientSince,
+    this.latestCall,
   });
 
   final String id;
@@ -202,6 +205,52 @@ class Lead {
   /// inventing an origin.
   final String? addedByName;
   final String? addedByRole;
+
+  /// Whether this contact is a CUSTOMER, from the backend's
+  /// `Lead.client_since`. Deliberately independent of [LeadStage]: a deal that
+  /// was reopened after being won leaves the person a client, so this is shown
+  /// as its own badge rather than being inferred from the pipeline strip.
+  /// Defaults to false so every existing `Lead(...)` call site — mock data,
+  /// [Lead.empty], the inbox card mapper — keeps compiling unchanged.
+  final bool isClient;
+  final DateTime? clientSince;
+
+  /// The most recent analysed call, returned inline with lead detail so the
+  /// Lead Detail screen can show the recording and that call's AI analysis
+  /// without another request. Null until a call has been analysed.
+  final LatestCall? latestCall;
+
+  /// Narrow copy for the customer flag alone.
+  ///
+  /// A general `copyWith` on [Lead] would need ~20 nullable parameters and
+  /// still couldn't express "set clientSince back to null" without a sentinel
+  /// — this is the only mutation the app performs on these two fields, so it
+  /// gets a purpose-built copy instead.
+  Lead copyWithClient({required bool isClient, DateTime? clientSince}) => Lead(
+    id: id,
+    name: name,
+    phone: phone,
+    score: score,
+    temperature: temperature,
+    source: source,
+    intent: intent,
+    lastContact: lastContact,
+    totalCalls: totalCalls,
+    averageScore: averageScore,
+    memory: memory,
+    script: script,
+    objections: objections,
+    checklist: checklist,
+    history: history,
+    propertyInterest: propertyInterest,
+    nextStep: nextStep,
+    pendingCommitments: pendingCommitments,
+    addedByName: addedByName,
+    addedByRole: addedByRole,
+    isClient: isClient,
+    clientSince: isClient ? clientSince : null,
+    latestCall: latestCall,
+  );
 
   /// Safe placeholder used while the inbox is loading or empty, so providers
   /// that must return a non-null [Lead] never throw on an empty list.
@@ -252,6 +301,11 @@ class Lead {
     checklist: _list(json['checklist'], ChecklistItem.fromJson),
     history: _list(json['history'], CallRecord.fromJson),
     propertyInterest: json['property_interest'] as String?,
+    isClient: json['is_client'] == true,
+    clientSince: _parseNullableDate(json['client_since']),
+    latestCall: json['latest_call'] is Map<String, dynamic>
+        ? LatestCall.fromJson(json['latest_call'] as Map<String, dynamic>)
+        : null,
     nextStep: json['next_step'] as String? ?? '',
     pendingCommitments:
         (json['pending_commitments'] as List<dynamic>? ?? const [])
@@ -276,8 +330,116 @@ class Lead {
     'checklist': checklist.map((e) => e.toJson()).toList(),
     'history': history.map((e) => e.toJson()).toList(),
     'property_interest': propertyInterest,
+    'is_client': isClient,
+    'client_since': clientSince?.toIso8601String(),
+    'latest_call': latestCall?.toJson(),
     'next_step': nextStep,
     'pending_commitments': pendingCommitments,
+  };
+}
+
+/// The newest analysed call for a lead: the recording plus what the AI heard.
+///
+/// Mirrors the backend's `latest_call` block, which BOTH lead-detail endpoints
+/// emit identically (there's a backend test pinning the two to the same shape),
+/// so this one model works regardless of which surface served it.
+class LatestCall {
+  const LatestCall({
+    required this.callId,
+    this.timestamp,
+    this.hasAudio = false,
+    this.durationLabel,
+    this.captureSource,
+    this.score,
+    this.leadVerdict,
+    this.sentimentLabel,
+    this.headline,
+    this.keyPoints = const [],
+    this.objectionsRaised = const [],
+    this.commitmentsMade = const [],
+    this.nextSteps = const [],
+  });
+
+  final String callId;
+  final DateTime? timestamp;
+
+  /// Whether a recording actually exists. The player is only built when this
+  /// is true — otherwise the screen would offer playback that 404s.
+  final bool hasAudio;
+
+  /// "MM:SS", derived server-side from the last transcript turn (there is no
+  /// duration column), so it's absent for a call with no transcript.
+  final String? durationLabel;
+
+  /// "app_call" / "auto_detected_*" / "manual_upload" — lets the UI explain a
+  /// call that appeared without the telecaller pressing Call.
+  final String? captureSource;
+
+  final int? score;
+  final String? leadVerdict;
+  final String? sentimentLabel;
+  final String? headline;
+  final List<String> keyPoints;
+  final List<String> objectionsRaised;
+  final List<String> commitmentsMade;
+  final List<String> nextSteps;
+
+  bool get autoCaptured => captureSource?.startsWith('auto_detected') ?? false;
+
+  static List<String> _strings(dynamic v) => v is List
+      ? [
+          for (final e in v)
+            if (e != null) e.toString(),
+        ]
+      : const [];
+
+  factory LatestCall.fromJson(Map<String, dynamic> json) {
+    final summary = json['call_summary'] is Map<String, dynamic>
+        ? json['call_summary'] as Map<String, dynamic>
+        : const <String, dynamic>{};
+    return LatestCall(
+      callId: (json['call_id'] ?? '').toString(),
+      timestamp: _parseNullableDate(json['timestamp']),
+      hasAudio: json['has_audio'] == true,
+      durationLabel: json['duration_label'] as String?,
+      captureSource: json['capture_source'] as String?,
+      score: (json['score'] as num?)?.round(),
+      leadVerdict: json['lead_verdict'] as String?,
+      sentimentLabel: json['sentiment_label'] as String?,
+      headline: json['headline'] as String?,
+      keyPoints: _strings(json['key_points']),
+      objectionsRaised: _strings(summary['objections_raised']),
+      commitmentsMade: _strings(summary['commitments_made']),
+      // next_steps entries are objects ({step, text, action_type,
+      // action_label}); the screen only needs their text.
+      nextSteps: json['next_steps'] is List
+          ? [
+              for (final e in (json['next_steps'] as List))
+                if (e is Map && (e['text'] ?? e['action_label']) != null)
+                  (e['text'] ?? e['action_label']).toString()
+                else if (e is String)
+                  e,
+            ]
+          : const [],
+    );
+  }
+
+  Map<String, dynamic> toJson() => {
+    'call_id': callId,
+    'timestamp': timestamp?.toIso8601String(),
+    'has_audio': hasAudio,
+    'duration_label': durationLabel,
+    'capture_source': captureSource,
+    'score': score,
+    'lead_verdict': leadVerdict,
+    'sentiment_label': sentimentLabel,
+    'headline': headline,
+    'key_points': keyPoints,
+    'call_summary': {
+      'objections_raised': objectionsRaised,
+      'commitments_made': commitmentsMade,
+    },
+    'next_steps': [for (final s in nextSteps) {'text': s}],
   };
 }
 
@@ -398,6 +560,7 @@ class CallRecord {
     this.placedBy,
     this.sentiment,
     this.captureSource,
+    this.hasAudio = false,
   });
 
   final String title;
@@ -427,6 +590,11 @@ class CallRecord {
   /// [CallLogEntry.captureSource].
   final String? captureSource;
 
+  /// Whether a RECORDING exists for this call — distinct from having a
+  /// [callId]. A call can carry analysis with no reachable audio, so the
+  /// history row offers playback off this rather than off `callId != null`.
+  final bool hasAudio;
+
   factory CallRecord.fromJson(Map<String, dynamic> json) => CallRecord(
     title: json['title'] as String? ?? '',
     duration: Duration(
@@ -441,6 +609,7 @@ class CallRecord {
     placedBy: json['telecaller_id'] as String?,
     sentiment: json['sentiment'] as String?,
     captureSource: json['capture_source'] as String?,
+    hasAudio: json['has_audio'] == true,
   );
 
   Map<String, dynamic> toJson() => {
@@ -453,6 +622,7 @@ class CallRecord {
     'telecaller_id': placedBy,
     'sentiment': sentiment,
     'capture_source': captureSource,
+    'has_audio': hasAudio,
   };
 }
 
@@ -583,6 +753,7 @@ class CallLogEntry {
     this.deviceCallId,
     this.sentiment,
     this.captureSource,
+    this.hasAudio = false,
   });
 
   final String id;
@@ -625,6 +796,13 @@ class CallLogEntry {
   /// should say so.
   bool get isAutoDetected => captureSource?.startsWith('auto_detected') ?? false;
 
+  /// Whether a RECORDING exists for this call — distinct from merely having a
+  /// [callId]. A call can carry analysis with no reachable audio, so the list
+  /// shows a play affordance off this rather than off `callId != null`.
+  /// Defaults to false: a locally-logged call that hasn't been uploaded yet
+  /// has nothing to play, and claiming otherwise would offer a dead button.
+  final bool hasAudio;
+
   CallLogEntry copyWith({
     Duration? duration,
     int? score,
@@ -638,6 +816,7 @@ class CallLogEntry {
     String? deviceCallId,
     String? sentiment,
     String? captureSource,
+    bool? hasAudio,
   }) => CallLogEntry(
     id: id,
     leadName: leadName ?? this.leadName,
@@ -653,6 +832,7 @@ class CallLogEntry {
     deviceCallId: deviceCallId ?? this.deviceCallId,
     sentiment: sentiment ?? this.sentiment,
     captureSource: captureSource ?? this.captureSource,
+    hasAudio: hasAudio ?? this.hasAudio,
   );
 
   factory CallLogEntry.fromJson(Map<String, dynamic> json) => CallLogEntry(
@@ -672,6 +852,7 @@ class CallLogEntry {
     deviceCallId: json['device_call_id'] as String?,
     sentiment: json['sentiment'] as String?,
     captureSource: json['capture_source'] as String?,
+    hasAudio: json['has_audio'] == true,
   );
 
   Map<String, dynamic> toJson() => {
@@ -689,6 +870,7 @@ class CallLogEntry {
     'device_call_id': deviceCallId,
     'sentiment': sentiment,
     'capture_source': captureSource,
+    'has_audio': hasAudio,
   };
 }
 
@@ -785,3 +967,9 @@ DateTime _parseDate(Object? raw) {
   }
   return DateTime.fromMillisecondsSinceEpoch(0);
 }
+
+/// Like [_parseDate] but keeps "absent" distinguishable from "the epoch".
+/// `client_since` and a call's `timestamp` are genuinely optional, and an
+/// epoch fallback would render as 1 Jan 1970 on screen.
+DateTime? _parseNullableDate(Object? raw) =>
+    raw is String ? DateTime.tryParse(raw) : null;

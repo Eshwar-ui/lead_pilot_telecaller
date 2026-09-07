@@ -397,6 +397,18 @@ class LeadSummaryCard extends StatelessWidget {
                       background: AppColors.foam,
                       border: AppColors.iceCold,
                     ),
+                    // Sits with the source/intent pills rather than in the
+                    // pipeline strip below: being a customer is a fact about
+                    // the person, not a position in the deal pipeline (a
+                    // reopened deal leaves them a client).
+                    if (lead.isClient)
+                      const LpPill(
+                        label: 'Client',
+                        icon: Icons.verified_outlined,
+                        foreground: AppColors.salem,
+                        background: AppColors.foam,
+                        border: AppColors.iceCold,
+                      ),
                   ],
                 ),
                 if (totalCalls != null || lastContactLabel != null) ...[
@@ -560,6 +572,47 @@ class _ScoreRingPainter extends CustomPainter {
       oldDelegate.progress != progress || oldDelegate.color != color;
 }
 
+/// Wraps a summary tile in a tap-to-open explanation of the number it shows.
+///
+/// Counts on the dashboards are the product of real rules — which calls count
+/// as "today", what makes a call positive, when a follow-up turns overdue —
+/// and a telecaller comparing their tile against their own memory of the day
+/// has no way to see those rules. Tap, rather than the framework default of
+/// long-press, because nothing else on these screens rewards a long press so
+/// nobody would find it; long-press keeps working too, which is what
+/// TalkBack uses.
+class LpInfoTooltip extends StatelessWidget {
+  const LpInfoTooltip({super.key, required this.message, required this.child});
+
+  final String message;
+  final Widget child;
+
+  /// The affordance that marks a tile as tappable. Sized to sit inline with
+  /// a tile's label row without pushing the value off its baseline.
+  static const hintIcon = Icon(
+    Icons.info_outline,
+    size: 12,
+    color: AppColors.tide,
+  );
+
+  @override
+  Widget build(BuildContext context) {
+    return Tooltip(
+      message: message,
+      triggerMode: TooltipTriggerMode.tap,
+      showDuration: const Duration(seconds: 6),
+      margin: const EdgeInsets.symmetric(horizontal: 16),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+      decoration: BoxDecoration(
+        color: AppColors.zeus,
+        borderRadius: BorderRadius.circular(AppRadius.md),
+      ),
+      textStyle: AppText.body13.copyWith(color: AppColors.white, fontSize: 12),
+      child: child,
+    );
+  }
+}
+
 class MetricTile extends StatelessWidget {
   const MetricTile({
     super.key,
@@ -567,6 +620,7 @@ class MetricTile extends StatelessWidget {
     required this.value,
     this.valueColor = AppColors.zeus,
     this.mono = false,
+    this.info,
   });
 
   final String label;
@@ -574,15 +628,39 @@ class MetricTile extends StatelessWidget {
   final Color valueColor;
   final bool mono;
 
+  /// Plain-English description of exactly what this number counts. When set,
+  /// the tile becomes tappable and shows it — see [LpInfoTooltip].
+  final String? info;
+
   @override
   Widget build(BuildContext context) {
+    final tile = _tile();
+    final message = info;
+    return message == null
+        ? tile
+        : LpInfoTooltip(message: message, child: tile);
+  }
+
+  Widget _tile() {
     return LpCard(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 11),
       child: Column(
         children: [
-          Text(
-            label.toUpperCase(),
-            style: AppText.label11.copyWith(fontSize: 10),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Flexible(
+                child: Text(
+                  label.toUpperCase(),
+                  style: AppText.label11.copyWith(fontSize: 10),
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+              if (info != null) ...[
+                const SizedBox(width: 3),
+                LpInfoTooltip.hintIcon,
+              ],
+            ],
           ),
           const AppGap.xxs(),
           Text(

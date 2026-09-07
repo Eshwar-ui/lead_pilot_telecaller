@@ -1,4 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <color name="launch_background">#FFFFFF</color>
+    <color name="launch_background">#FAF8F5</color>
+    <!-- Asan amber: tints the status-bar notification silhouette. -->
+    <color name="notification_accent">#FAAC0C</color>
 </resources>

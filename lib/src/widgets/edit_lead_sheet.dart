@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../models/lead.dart';
 import '../services/local_lead_override_store.dart';
+import '../services/device_contact_service.dart';
 import '../state/providers.dart';
 import '../theme/app_colors.dart';
 import '../theme/app_spacing.dart';
@@ -101,6 +102,20 @@ class _EditLeadSheetState extends ConsumerState<EditLeadSheet> {
               temperature: _temperature,
             ),
           );
+
+      // Keep the address-book card in step with a corrected name or number,
+      // so the lead keeps ringing in by name. Same non-fatal contract as
+      // creation: the lead edit is already saved, and a contacts failure
+      // here is not worth blocking or undoing it.
+      final outcome = await ref
+          .read(deviceContactServiceProvider)
+          .saveLead(name: _name.text, phone: '+91$localDigits');
+      if (outcome.isNoteworthy && mounted) {
+        ScaffoldMessenger.of(context)
+          ..clearSnackBars()
+          ..showSnackBar(SnackBar(content: Text(outcome.message!)));
+      }
+
       if (mounted) Navigator.of(context).pop();
     } catch (_) {
       if (mounted) {

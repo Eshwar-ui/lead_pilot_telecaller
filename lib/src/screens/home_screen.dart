@@ -9,13 +9,29 @@ import 'package:flutter_app_utilities/flutter_app_utilities.dart'
 import '../models/lead.dart';
 import '../screens/add_outbound_lead_screen.dart';
 import '../services/call_actions.dart';
+import '../services/local_call_store.dart';
 import '../state/providers.dart';
 import '../theme/app_colors.dart';
 import '../theme/app_spacing.dart';
 import '../theme/app_theme.dart';
 import '../widgets/leadpilot_widgets.dart';
+import '../widgets/recording_required_dialog.dart';
 import '../widgets/schedule_call_sheet.dart';
 import '../widgets/shimmer.dart';
+
+/// Whether the lead list should stay behind a check-in prompt.
+///
+/// Deliberately only true once today's record has actually come back and says
+/// there is no check-in. A null record means the fetch is still in flight or
+/// failed outright (offline, backend down), and locking a telecaller out of
+/// their own leads because attendance could not be read would be far worse
+/// than a missed check-in. Checking out again later does not re-lock the
+/// list — the gate asks "have you started today", not "are you on shift right
+/// now".
+bool inboxNeedsCheckIn(AttendanceState attendance) {
+  final record = attendance.record;
+  return record != null && !record.isCheckedIn;
+}
 
 class HomeScreen extends ConsumerStatefulWidget {
   const HomeScreen({super.key});
@@ -29,7 +45,17 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   final _searchController = TextEditingController();
   String _query = '';
 
-  static const _filters = ['All', 'High Intent', 'New', 'Follow-up', 'Cold'];
+  // 'Clients' is a customer-status filter, not an intent bucket like the
+  // others — a client can sit at any score or stage, so it can't be folded
+  // into the intent chips.
+  static const _filters = [
+    'All',
+    'Clients',
+    'High Intent',
+    'New',
+    'Follow-up',
+    'Cold',
+  ];
 
   @override
   void dispose() {
@@ -38,6 +64,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   }
 
   List<Lead> _applyFilter(List<Lead> all) => switch (_filter) {
+    'Clients' => all.where((l) => l.isClient).toList(),
     'High Intent' =>
       all.where((l) => l.intent.toLowerCase().contains('high')).toList(),
     'New' => all.where((l) => l.score <= 0).toList(),
@@ -73,6 +100,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     // mock fallback either — see LeadsController._load) — a full-screen
     // state beats a bare empty list with no explanation.
     final noServer = !ref.watch(serverReachableProvider) && leads.isEmpty;
+    final needsCheckIn = inboxNeedsCheckIn(ref.watch(attendanceProvider));
 
     return Scaffold(
       backgroundColor: AppColors.springWood,
@@ -95,7 +123,11 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                     LpFallbackBanner(
                       onRetry: () => ref.read(leadsProvider.notifier).refresh(),
                     ),
-                  Expanded(child: _buildScrollBody(context, filtered, loading)),
+                  Expanded(
+                    child: needsCheckIn
+                        ? const _CheckInGate()
+                        : _buildScrollBody(context, filtered, loading),
+                  ),
                 ],
               ),
       ),
@@ -194,22 +226,21 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
             ),
             child: Builder(
               builder: (_) {
-                final callLog = ref.watch(callLogProvider);
-                final now = DateTime.now();
-                final callsToday = callLog.where(
-                  (e) =>
-                      e.calledAt.year == now.year &&
-                      e.calledAt.month == now.month &&
-                      e.calledAt.day == now.day,
-                );
-                // Real per-call sentiment from the backend (call_sentiment_label:
-                // the prospect's average turn sentiment, not a score proxy) —
-                // null for a call with no sentiment signal yet (not analyzed, or
-                // a native device-log entry with no backend analysis at all), so
-                // those are correctly excluded rather than miscounted either way.
-                final positiveToday = callsToday
-                    .where((e) => e.sentiment == 'positive')
-                    .length;
+                // Counted in SQL over the whole log, not by filtering the
+                // loaded page — which would report "today's calls, among the
+                // most recent 60" on a busy day.
+                //
+                // Positive Calls uses real per-call sentiment from the backend
+                // (call_sentiment_label: the prospect's average turn sentiment,
+                // not a score proxy). It is null for a call with no sentiment
+                // signal yet — not analyzed, or a native device-log entry with
+                // no backend analysis at all — so those are correctly excluded
+                // rather than miscounted either way.
+                final stats =
+                    ref.watch(callLogStatsProvider).value ??
+                    const CallLogStats();
+                final callsToday = stats.today;
+                final positiveToday = stats.positiveToday;
                 final followUpsDue = ref
                     .watch(followUpsProvider)
                     .where((t) => t.dueToday && t.status != FollowUpStatus.done)
@@ -226,7 +257,11 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                           child: _StatTile(
                             icon: Icons.call_outlined,
                             label: 'Calls Today',
-                            value: '${callsToday.length}',
+                            value: '$callsToday',
+                            info:
+                                'Every call logged since midnight today — '
+                                'placed from the app, detected on your phone, '
+                                'or uploaded by you. Resets at midnight.',
                           ),
                         ),
                         const SizedBox(width: AppSpacing.sm),
@@ -236,6 +271,11 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                             label: 'Positive Calls',
                             value: '$positiveToday',
                             valueColor: AppColors.salem,
+                            info:
+                                'Today\'s calls where the AI read the '
+                                'prospect as positive overall. Calls not yet '
+                                'analysed are not counted either way, so this '
+                                'can lag Calls Today by a few minutes.',
                           ),
                         ),
                       ],
@@ -249,6 +289,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                             label: 'Follow-ups Due',
                             value: '$followUpsDue',
                             valueColor: AppColors.tahitiGold,
+                            info:
+                                'Follow-ups scheduled for today that you '
+                                'have not marked done yet. Ones due on a '
+                                'later date are not counted here.',
                           ),
                         ),
                         const SizedBox(width: AppSpacing.sm),
@@ -258,6 +302,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                             label: 'High Intent Leads',
                             value: '$highIntent',
                             valueColor: AppColors.blueRibbon,
+                            info:
+                                'Leads the AI marked high intent from what '
+                                'they said on your calls. This is your whole '
+                                'assigned inbox, not just today.',
                           ),
                         ),
                       ],
@@ -600,6 +648,7 @@ class _StatTile extends StatelessWidget {
     required this.label,
     required this.value,
     this.valueColor = AppColors.zeus,
+    required this.info,
   });
 
   final IconData icon;
@@ -607,8 +656,14 @@ class _StatTile extends StatelessWidget {
   final String value;
   final Color valueColor;
 
+  /// Plain-English description of exactly what this number counts.
+  final String info;
+
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context) =>
+      LpInfoTooltip(message: info, child: _tile());
+
+  Widget _tile() {
     return Container(
       padding: const EdgeInsets.all(AppSpacing.md),
       decoration: BoxDecoration(
@@ -632,6 +687,7 @@ class _StatTile extends StatelessWidget {
                   overflow: TextOverflow.ellipsis,
                 ),
               ),
+              LpInfoTooltip.hintIcon,
             ],
           ),
           const SizedBox(height: AppSpacing.xs),
@@ -644,6 +700,77 @@ class _StatTile extends StatelessWidget {
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+/// Stands in for the lead list until the telecaller checks in for the day.
+///
+/// Attendance was previously self-service on the Profile tab, which meant a
+/// telecaller could work a whole day of calls without a shift ever being
+/// recorded — leaving the founder's attendance and per-hour numbers reading
+/// as if nobody worked. Putting the check-in in front of the leads makes
+/// starting the day the first thing that happens, without hiding the rest of
+/// the app: Calls, Follow-ups and Profile are all still reachable.
+class _CheckInGate extends ConsumerWidget {
+  const _CheckInGate();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final busy = ref.watch(attendanceProvider).actionInProgress;
+
+    return Center(
+      child: SingleChildScrollView(
+        padding: const EdgeInsets.fromLTRB(24, 12, 24, 24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 68,
+              height: 68,
+              decoration: const BoxDecoration(
+                color: AppColors.ribbonSurface,
+                shape: BoxShape.circle,
+              ),
+              child: const Icon(
+                Icons.login,
+                size: 30,
+                color: AppColors.blueRibbon,
+              ),
+            ),
+            const SizedBox(height: AppSpacing.md),
+            Text(
+              'Check in to start your day',
+              style: AppText.display16,
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: AppSpacing.xs),
+            Text(
+              'Your leads open once you are on shift. Checking in is what '
+              'puts your calls and hours on your record.',
+              style: AppText.body13.copyWith(color: AppColors.schooner),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: AppSpacing.lg),
+            SizedBox(
+              width: double.infinity,
+              child: PrimaryButton(
+                label: busy ? 'Checking in…' : 'Check In',
+                icon: busy ? null : Icons.login,
+                onTap: busy
+                    ? null
+                    : () => ref.read(attendanceProvider.notifier).checkIn(),
+              ),
+            ),
+            const SizedBox(height: AppSpacing.sm),
+            Text(
+              'Calls, Follow-ups and Profile stay open below.',
+              style: AppText.caption11.copyWith(color: AppColors.tide),
+              textAlign: TextAlign.center,
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -740,11 +867,27 @@ class _LeadTile extends ConsumerWidget {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        // Name
-                        Text(
-                          lead.name,
-                          style: AppText.display16,
-                          overflow: TextOverflow.ellipsis,
+                        // Name (+ a customer marker, since a client can appear
+                        // anywhere in this list regardless of score or stage)
+                        Row(
+                          children: [
+                            Flexible(
+                              child: Text(
+                                lead.name,
+                                style: AppText.display16,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                            if (lead.isClient) ...[
+                              const SizedBox(width: AppSpacing.xxs),
+                              const Icon(
+                                Icons.verified,
+                                size: 14,
+                                color: AppColors.salem,
+                                semanticLabel: 'Client',
+                              ),
+                            ],
+                          ],
                         ),
                         const SizedBox(height: 3),
                         // Phone
@@ -881,6 +1024,11 @@ class _LeadTile extends ConsumerWidget {
   }
 
   Future<void> _startQuickCall(BuildContext context, WidgetRef ref) async {
+    // A call this phone cannot record produces no transcript, score or lead
+    // memory — so it is stopped here, with the fix offered in the dialog.
+    if (!await ensureCallCanBeRecorded(context)) return;
+    if (!context.mounted) return;
+
     final lastCall = lead.history.isNotEmpty ? lead.history.first : null;
     final result = await startCallWithNotesBubble(
       leadId: lead.id,

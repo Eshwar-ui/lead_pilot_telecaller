@@ -112,7 +112,9 @@ void main() {
         overrides: [
           captureTelemetryServiceProvider.overrideWithValue(telemetry),
           leadsProvider.overrideWith(() => _FixedLeadsController(leads)),
-          localCallsProvider.overrideWith(() => _FixedLocalCalls(calls)),
+          // sweepBackfill asks the store for its own time window now, rather
+          // than filtering whatever page the Calls screen has loaded.
+          localCallStoreProvider.overrideWithValue(_FixedCallStore(calls)),
           // Every number that isn't in the local lead list falls through to the
           // backend dedupe check; here it always answers "not a lead".
           leadRepositoryProvider.overrideWithValue(_NoMatchLeadRepository()),
@@ -358,12 +360,20 @@ class _FixedLeadsController extends LeadsController {
   List<Lead> build() => _leads;
 }
 
-class _FixedLocalCalls extends LocalCallsController {
-  _FixedLocalCalls(this._calls);
+/// Serves a fixed set of calls without a database. The sweep only ever reads
+/// its recent window, so that is the only query worth answering here.
+class _FixedCallStore implements LocalCallStore {
+  _FixedCallStore(this._calls);
   final List<CallLogEntry> _calls;
 
   @override
-  List<CallLogEntry> build() => _calls;
+  Future<List<CallLogEntry>> since(DateTime cutoff) async => [
+    for (final call in _calls)
+      if (call.calledAt.isAfter(cutoff)) call,
+  ];
+
+  @override
+  noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
 }
 
 class _NoMatchLeadRepository extends LeadRepository {

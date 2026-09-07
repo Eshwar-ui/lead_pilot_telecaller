@@ -34,6 +34,11 @@ class ApiEndpoints {
   static String leadStage(String contactKey) =>
       '/api/leads/by-contact/$contactKey/stage';
 
+  // Customer status — mark/unmark a lead as a client. Keyed by contact_key
+  // like the stage route, since that's the only lead identifier this app sees.
+  static String leadClient(String contactKey) =>
+      '/api/leads/by-contact/$contactKey/client';
+
   // Memory bubble (per-contact cumulative memory)
   static String memory(String contactKey) => '/api/memory/$contactKey';
   static String rebuildMemory(String contactKey) =>
@@ -60,6 +65,10 @@ class ApiEndpoints {
   // Consolidated Score-tab payload (rings + breakdown + sentiment timeline).
   // Requires a completed lead-analysis — the upload pipeline runs it automatically.
   static String callScore(String callId) => '/api/calls/$callId/score';
+
+  // Call recording playback. Requires the Authorization header, so it is
+  // streamed through an AudioSource with headers rather than a bare URL.
+  static String callAudio(String callId) => '/api/calls/$callId/audio';
 
   // Raw transcript turns for a call
   static String transcript(String callId) => '/api/calls/$callId/transcript';
@@ -88,6 +97,12 @@ class ApiEndpoints {
 
   // Organization profile (Profile screen's org card)
   static const String orgProfile = '/api/auth/org';
+
+  // The signed-in user's own record. The Profile screen re-reads this so a
+  // founder's correction to a telecaller's name/email (PATCH /api/team/{id})
+  // shows up here without forcing a logout — the JWT's cached copy is a
+  // snapshot from login and goes stale the moment it's edited.
+  static const String me = '/api/auth/me';
 
   // FCM device token registration (push_notification_service.dart) — so
   // push_notifications.py on the backend has somewhere to send to.

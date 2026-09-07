@@ -143,12 +143,15 @@ class _ScheduleCallSheetState extends ConsumerState<ScheduleCallSheet> {
 
       await ref.read(followUpsProvider.notifier).schedule(built.task);
 
-      // Schedule a device notification at the chosen time.
+      // Device reminders an hour ahead, five minutes ahead, and on time.
+      // Skipped entirely for a time already past — the individual reminders
+      // whose moment has gone are dropped inside the service too, so a
+      // follow-up booked for 20 minutes away still gets the last two.
       if (!built.isOverdue) {
-        await NotificationService.instance.scheduleFollowUp(
-          notifId: NotificationService.notifIdFor(id),
-          title: 'Follow-up: ${widget.lead.name}',
-          body: built.task.taskText,
+        await NotificationService.instance.scheduleFollowUpReminders(
+          taskId: id,
+          leadName: widget.lead.name,
+          taskText: built.task.taskText,
           scheduledAt: built.scheduledAt,
         );
       }

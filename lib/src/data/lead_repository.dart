@@ -136,6 +136,30 @@ class LeadRepository {
     );
   }
 
+  // ── Customer status ─────────────────────────────────────────────────────
+
+  /// `PATCH /api/leads/by-contact/{contact_key}/client` — marks or unmarks a
+  /// lead as a CUSTOMER.
+  ///
+  /// Deliberately not part of [updateLeadStage]: customer status is not a
+  /// pipeline position (a reopened deal leaves the person a client), and the
+  /// backend keys it off its own `client_since` column so revenue reporting —
+  /// which counts Closed Won stages — is untouched by it.
+  Future<({bool isClient, DateTime? clientSince})> setClient(
+    String contactKey,
+    bool isClient,
+  ) async {
+    final body = await _client.patch(
+      ApiEndpoints.leadClient(contactKey),
+      body: {'is_client': isClient},
+    );
+    final map = body is Map<String, dynamic> ? body : const <String, dynamic>{};
+    return (
+      isClient: map['is_client'] == true,
+      clientSince: _parseTs(map['client_since']),
+    );
+  }
+
   // ── Telecaller score ────────────────────────────────────────────────────
 
   /// `GET /api/telecaller/score?window_days=` for the Profile / Score tab.
@@ -462,6 +486,8 @@ class LeadRepository {
       checklist: const [],
       history: const [],
       propertyInterest: null,
+      isClient: j['is_client'] == true,
+      clientSince: _parseTs(j['client_since']),
     );
   }
 
@@ -569,6 +595,11 @@ class LeadRepository {
               ),
         ],
       ),
+      isClient: j['is_client'] == true,
+      clientSince: _parseTs(j['client_since']),
+      latestCall: j['latest_call'] is Map<String, dynamic>
+          ? LatestCall.fromJson(j['latest_call'] as Map<String, dynamic>)
+          : null,
       objections: objections,
       checklist: <ChecklistItem>[
         if (briefChecklist is List)

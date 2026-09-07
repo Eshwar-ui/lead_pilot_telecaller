@@ -151,11 +151,17 @@ class CallRecordingService {
     return rest.endsWith('/') ? rest : '$rest/';
   }
 
-  /// How many candidate-folder audio files to fetch per query. Generous
-  /// enough to cover every candidate folder's recent files without an
-  /// unbounded query; the recency window / phone-digit match narrow it down
-  /// from there.
-  static const int _queryLimit = 300;
+  /// How many candidate-folder audio files to fetch per query.
+  ///
+  /// This runs on the post-call path — the worst moment on a memory-tight
+  /// phone, with the recording also being materialized to disk — and
+  /// [_allCandidateRows] issues it twice (MediaStore, then the granted
+  /// folder). Selection only ever keeps the newest match inside a 30-minute
+  /// window, so rows far beyond the most recent handful can never be chosen;
+  /// 300 was paying to marshal them across the platform channel for nothing.
+  /// The diagnostics screen deliberately queries wider (see
+  /// [RecordingDiagnostics]) because breadth is the point there.
+  static const int _queryLimit = 80;
 
   /// Below this, a file is almost certainly an empty/just-created placeholder
   /// rather than a real recording — some OEM dialers create the file the

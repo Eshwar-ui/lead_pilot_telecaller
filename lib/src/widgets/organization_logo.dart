@@ -22,16 +22,17 @@ class OrganizationLogo extends StatelessWidget {
   final String? url;
   final double size;
 
-  Widget _fallback() => ColoredBox(
-    color: AppColors.zeus,
-    child: Padding(
-      padding: EdgeInsets.all(size * 0.08),
-      child: Image.asset(
-        'assets/images/asan_logo.png',
-        fit: BoxFit.contain,
-        excludeFromSemantics: true,
-      ),
-    ),
+  /// Decode budget for this tile. Images are cached at their DECODED size,
+  /// not their display size, so without this the 1095x975 source would sit in
+  /// the cache as ~4.3 MB to fill a 44 px square.
+  int _decodeWidth(BuildContext context) =>
+      (size * MediaQuery.devicePixelRatioOf(context)).round();
+
+  Widget _fallback(BuildContext context) => Image.asset(
+    'assets/images/asan_logo.png',
+    fit: BoxFit.contain,
+    excludeFromSemantics: true,
+    cacheWidth: _decodeWidth(context),
   );
 
   ({String mime, Uint8List bytes})? _decodeDataUrl(String value) {
@@ -50,7 +51,8 @@ class OrganizationLogo extends StatelessWidget {
     }
   }
 
-  Widget _image(String value) {
+  Widget _image(BuildContext context, String value) {
+    final decodeWidth = _decodeWidth(context);
     final data = _decodeDataUrl(value);
     if (data != null) {
       if (data.mime == 'image/svg+xml') {
@@ -60,7 +62,7 @@ class OrganizationLogo extends StatelessWidget {
           height: size,
           fit: BoxFit.contain,
           excludeFromSemantics: true,
-          errorBuilder: (_, _, _) => _fallback(),
+          errorBuilder: (_, _, _) => _fallback(context),
         );
       }
       return Image.memory(
@@ -69,7 +71,11 @@ class OrganizationLogo extends StatelessWidget {
         height: size,
         fit: BoxFit.contain,
         excludeFromSemantics: true,
-        errorBuilder: (_, _, _) => _fallback(),
+        // Founder-uploaded, so its dimensions are whatever they happened to
+        // upload — a 2000x2000 PNG would otherwise cost 16 MB of cache to
+        // fill this tile.
+        cacheWidth: decodeWidth,
+        errorBuilder: (_, _, _) => _fallback(context),
       );
     }
 
@@ -82,8 +88,8 @@ class OrganizationLogo extends StatelessWidget {
         height: size,
         fit: BoxFit.contain,
         excludeFromSemantics: true,
-        placeholderBuilder: (_) => _fallback(),
-        errorBuilder: (_, _, _) => _fallback(),
+        placeholderBuilder: (_) => _fallback(context),
+        errorBuilder: (_, _, _) => _fallback(context),
       );
     }
     return Image.network(
@@ -92,7 +98,8 @@ class OrganizationLogo extends StatelessWidget {
       height: size,
       fit: BoxFit.contain,
       excludeFromSemantics: true,
-      errorBuilder: (_, _, _) => _fallback(),
+      cacheWidth: decodeWidth,
+      errorBuilder: (_, _, _) => _fallback(context),
     );
   }
 
@@ -112,7 +119,9 @@ class OrganizationLogo extends StatelessWidget {
           border: Border.all(color: AppColors.westar),
         ),
         clipBehavior: Clip.antiAlias,
-        child: value.isEmpty ? _fallback() : _image(value),
+        child: value.isEmpty
+            ? _fallback(context)
+            : _image(context, value),
       ),
     );
   }

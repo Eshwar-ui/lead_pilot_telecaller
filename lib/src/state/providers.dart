@@ -361,6 +361,30 @@ class LeadsController extends Notifier<List<Lead>> {
     await enrich(contactKey);
   }
 
+  /// Mark/unmark a contact as a CUSTOMER, then reflect it in the list so the
+  /// badge updates without a full refetch.
+  ///
+  /// The server owns the timestamp (`client_since`), so its answer is what
+  /// lands in state — not an optimistic guess. Throws on failure so the caller
+  /// can surface a toast rather than silently showing a badge that never
+  /// persisted.
+  Future<void> setClient(String contactKey, bool isClient) async {
+    if (ApiConfig.useMockData || contactKey.isEmpty) return;
+    final result = await ref
+        .read(leadRepositoryProvider)
+        .setClient(contactKey, isClient);
+    state = [
+      for (final lead in state)
+        if (lead.id == contactKey)
+          lead.copyWithClient(
+            isClient: result.isClient,
+            clientSince: result.clientSince,
+          )
+        else
+          lead,
+    ];
+  }
+
   /// Persist a manual edit to a lead and reflect it immediately everywhere.
   Future<void> updateLead(String leadId, LeadOverride override) async {
     await ref.read(localLeadOverrideStoreProvider).put(leadId, override);
@@ -491,6 +515,12 @@ class FollowUpController extends Notifier<List<FollowUpTask>> {
         return; // superseded — drop this result
       }
       state = local;
+      // Arm reminders from the local copy too, not only after the reconcile
+      // below: that reconcile is skipped entirely when the device is offline,
+      // which is exactly when a telecaller most needs the reminder they
+      // scheduled to still fire. Idempotent — it only schedules what the OS
+      // does not already have pending.
+      unawaited(_syncReminders(local));
       // Reconcile against the backend so status changes made on another device
       // (same telecaller account) propagate: a follow-up marked done or deleted
       // elsewhere is reflected here, not just newly-created ones. Fail-soft —
@@ -506,6 +536,11 @@ class FollowUpController extends Notifier<List<FollowUpTask>> {
         state = reconciled;
         // Persist the merged view so it survives a restart without re-fetching.
         await ref.read(localFollowUpStoreProvider).replaceAll(reconciled);
+        // A follow-up created in the founder's web portal or on another device
+        // arrives here with no device alarms behind it — only the sheet that
+        // creates one locally schedules them. Arm whatever is missing (also
+        // recovering alarms an OEM battery manager or a reinstall dropped).
+        unawaited(_syncReminders(reconciled));
       } catch (_) {
         // Offline / backend down — local remains the source of truth.
       }
@@ -515,6 +550,26 @@ class FollowUpController extends Notifier<List<FollowUpTask>> {
       if (generation == _loadGeneration) {
         ref.read(followUpsLoadingProvider.notifier).set(false);
       }
+    }
+  }
+
+  /// Arms device reminders for every still-pending, still-future follow-up
+  /// that doesn't already have them. Fail-soft: reminders are a convenience,
+  /// and the list itself must render regardless.
+  Future<void> _syncReminders(List<FollowUpTask> tasks) async {
+    try {
+      await NotificationService.instance.syncFollowUpReminders([
+        for (final t in tasks)
+          if (t.status != FollowUpStatus.done && t.scheduledAt != null)
+            FollowUpReminderRequest(
+              taskId: t.id,
+              leadName: t.leadName,
+              taskText: t.taskText,
+              scheduledAt: t.scheduledAt!,
+            ),
+      ]);
+    } catch (_) {
+      // Reminders are best-effort — never let this break the follow-up list.
     }
   }
 
@@ -551,12 +606,10 @@ class FollowUpController extends Notifier<List<FollowUpTask>> {
   Future<void> markDone(String id) async {
     final backendId = _backendIdFor(id);
     await ref.read(localFollowUpStoreProvider).markDone(id);
-    // The device alarm scheduled at creation time (see schedule_call_sheet.dart)
-    // has no idea the task is done — without this it fires on schedule anyway,
-    // showing a reminder for a follow-up the telecaller already completed.
-    await NotificationService.instance.cancel(
-      NotificationService.notifIdFor(id),
-    );
+    // The device alarms scheduled at creation time (see schedule_call_sheet.dart)
+    // have no idea the task is done — without this they fire on schedule anyway,
+    // showing reminders for a follow-up the telecaller already completed.
+    await NotificationService.instance.cancelFollowUp(id);
     // Reflect immediately. A concurrent reconcile is safe here — "done" is
     // sticky, so even if the backend hasn't recorded it yet the local done
     // isn't reverted.
@@ -575,11 +628,9 @@ class FollowUpController extends Notifier<List<FollowUpTask>> {
   Future<void> delete(String id) async {
     final backendId = _backendIdFor(id);
     await ref.read(localFollowUpStoreProvider).delete(id);
-    // Same reasoning as markDone: the standing device alarm doesn't know the
-    // task was deleted and would otherwise still fire at the original time.
-    await NotificationService.instance.cancel(
-      NotificationService.notifIdFor(id),
-    );
+    // Same reasoning as markDone: the standing device alarms don't know the
+    // task was deleted and would otherwise still fire at the original times.
+    await NotificationService.instance.cancelFollowUp(id);
     // Reflect the removal immediately in memory.
     state = [
       for (final t in state)
@@ -614,11 +665,50 @@ class FollowUpController extends Notifier<List<FollowUpTask>> {
 /// history is no longer merged live off every enriched lead — that made calls
 /// appear merely because a lead was opened, and vanish again on restart (both
 /// reported bugs). Sorted newest-first.
-final callLogProvider = Provider<List<CallLogEntry>>((ref) {
-  final entries = [...ref.watch(localCallsProvider)];
-  entries.sort((a, b) => b.calledAt.compareTo(a.calledAt));
-  return entries;
+/// The loaded window of the call log, newest first.
+///
+/// No longer every call ever made: [localCallsProvider] pages, and SQLite
+/// already returns rows in `called_at DESC` order, so there is nothing left
+/// for this to sort. Screens needing a number ACROSS the whole log read
+/// [callLogStatsProvider] instead of filtering this — it cannot answer
+/// questions about calls it has not loaded.
+final callLogProvider = Provider<List<CallLogEntry>>(
+  (ref) => ref.watch(localCallsProvider).entries,
+);
+
+/// Totals and averages over the ENTIRE call log, computed in SQL.
+///
+/// The Inbox, Calls and Profile tiles used to derive these by filtering an
+/// in-memory list of everything. Once that list became a window, that would
+/// have silently under-reported — a telecaller's month-to-date count quietly
+/// becoming "month-to-date, among the last 60 calls".
+final callLogStatsProvider = FutureProvider<CallLogStats>((ref) async {
+  // Keyed on the revision rather than the page: watching the page would
+  // re-run these full-table aggregates every time a scroll flipped the
+  // loading flag, which is a lot of scanning to arrive at the same numbers.
+  ref.watch(callLogRevisionProvider);
+  return ref.read(localCallStoreProvider).stats();
 });
+
+/// Every locally-recorded call for one lead, straight from the indexed column
+/// rather than by scanning a list that no longer holds all of them.
+final leadCallsProvider = FutureProvider.autoDispose
+    .family<List<CallLogEntry>, String>((ref, leadId) async {
+      ref.watch(localCallsProvider);
+      return ref.read(localCallStoreProvider).forLead(leadId);
+    });
+
+/// The same totals, narrowed to whatever the Calls screen is filtered to.
+///
+/// Its tiles have always described the rows on screen rather than the whole
+/// log — filtering to Inbound changed them — so the filter goes to SQL with
+/// the query instead of that behaviour quietly disappearing when the list
+/// stopped being fully in memory.
+final filteredCallLogStatsProvider = FutureProvider.autoDispose
+    .family<CallLogStats, CallLogFilter>((ref, filter) async {
+      ref.watch(callLogRevisionProvider);
+      return ref.read(localCallStoreProvider).stats(filter: filter);
+    });
 
 /// State for [CallLogSyncController] — whether the device call-log permission
 /// has been checked/granted yet, and whether a sync is currently running.

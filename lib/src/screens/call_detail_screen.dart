@@ -10,6 +10,7 @@ import '../state/providers.dart';
 import '../theme/app_colors.dart';
 import '../theme/app_spacing.dart';
 import '../theme/app_theme.dart';
+import '../widgets/call_recording_player.dart';
 import '../widgets/leadpilot_widgets.dart';
 import '../widgets/schedule_call_sheet.dart';
 
@@ -430,6 +431,34 @@ class _CallDetailScreenState extends ConsumerState<CallDetailScreen> {
                     heroScore: overall,
                     tab: _tab,
                     onTabChanged: (i) => setState(() => _tab = i),
+                  ),
+                  // Recording bar, deliberately OUTSIDE the IndexedStack so it
+                  // stays put across Summary/Score/Transcript — a telecaller
+                  // reading the transcript wants to scrub the audio at the
+                  // same time, which a per-tab player couldn't do.
+                  //
+                  // Always mounted rather than gated on a `has_audio` flag:
+                  // this screen loads transcript/analysis/score and has no
+                  // cheap way to know, and the player's own 404 branch already
+                  // says "No recording was saved for this call." — the honest
+                  // answer, at the cost of one request for a call with none.
+                  Container(
+                    decoration: const BoxDecoration(
+                      color: AppColors.white,
+                      border: Border(
+                        bottom: BorderSide(color: AppColors.westar),
+                      ),
+                    ),
+                    padding: const EdgeInsets.fromLTRB(
+                      AppSpacing.md,
+                      AppSpacing.xs,
+                      AppSpacing.md,
+                      AppSpacing.xs,
+                    ),
+                    child: CallRecordingPlayer(
+                      callId: widget.callId,
+                      compact: true,
+                    ),
                   ),
                   Expanded(
                     child: IndexedStack(

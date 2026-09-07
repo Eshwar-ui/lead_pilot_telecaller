@@ -149,11 +149,26 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                               Semantics(
                                 label: 'Asan Innovators logo',
                                 image: true,
-                                child: Image.asset(
-                                  'assets/images/asan_logo.png',
-                                  width: 116,
+                                child: Container(
+                                  width: 80,
                                   height: 72,
-                                  fit: BoxFit.contain,
+                                  padding: const EdgeInsets.all(9),
+                                  decoration: BoxDecoration(
+                                    color: AppColors.white,
+                                    borderRadius: BorderRadius.circular(
+                                      AppRadius.lg,
+                                    ),
+                                  ),
+                                  child: Image.asset(
+                                    'assets/images/asan_logo.png',
+                                    fit: BoxFit.contain,
+                                    cacheWidth:
+                                        (80 *
+                                                MediaQuery.devicePixelRatioOf(
+                                                  context,
+                                                ))
+                                            .round(),
+                                  ),
                                 ),
                               ),
                               const SizedBox(width: 12),

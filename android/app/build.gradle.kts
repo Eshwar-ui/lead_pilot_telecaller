@@ -63,6 +63,21 @@ android {
             } else {
                 signingConfigs.getByName("debug")
             }
+
+            // Release builds shipped unminified and unshrunk, carrying every
+            // resource and the full class table. Telecallers are issued entry
+            // phones whose storage is usually near full, so install size is a
+            // real barrier — and less dex is also less to map at startup.
+            //
+            // See proguard-rules.pro: flutter_local_notifications is the one
+            // dependency that genuinely breaks under R8, and the rules there
+            // are what keep scheduled follow-up reminders working.
+            isMinifyEnabled = true
+            isShrinkResources = true
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro",
+            )
         }
     }
 }

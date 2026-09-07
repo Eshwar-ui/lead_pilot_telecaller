@@ -114,16 +114,22 @@ class _LeadDetailScreenState extends ConsumerState<LeadDetailScreen> {
               ),
             ),
             const AppGap.xs(axis: Axis.horizontal),
-            SecondaryButton(
-              label: '',
-              icon: Icons.sms_outlined,
-              onTap: () => launchSms(lead.phone),
+            Tooltip(
+              message: 'Send SMS',
+              child: SecondaryButton(
+                label: '',
+                icon: Icons.sms_outlined,
+                onTap: () => launchSms(lead.phone),
+              ),
             ),
             const AppGap.xs(axis: Axis.horizontal),
-            SecondaryButton(
-              label: '',
-              icon: Icons.calendar_today_outlined,
-              onTap: () => ScheduleCallSheet.show(context, lead),
+            Tooltip(
+              message: 'Schedule a call',
+              child: SecondaryButton(
+                label: '',
+                icon: Icons.calendar_today_outlined,
+                onTap: () => ScheduleCallSheet.show(context, lead),
+              ),
             ),
           ],
         ),
@@ -139,23 +145,26 @@ class _LeadDetailScreenState extends ConsumerState<LeadDetailScreen> {
             ),
             const AppGap.md(),
             _PipelineStrip(leadId: lead.id),
+            const AppGap.md(),
+            // What to do next sits right under the current stage — the
+            // telecaller about to dial shouldn't have to scroll past the call
+            // log and memory bubble to find it.
+            _NextStepsPanel(
+              lead: lead,
+              onSchedule: () => ScheduleCallSheet.show(context, lead),
+            ),
             if (lead.latestCall != null) ...[
               const AppGap.md(),
               LatestCallPanel(lead: lead, call: lead.latestCall!),
             ],
+            const AppGap.md(),
+            MemoryPanel(lead: lead),
             const AppGap.md(),
             CallHistoryPanel(
               leadId: lead.id,
               leadName: lead.name,
               history: mergedHistory,
               onUploadRecording: () => UploadRecordingSheet.show(context, lead),
-            ),
-            const AppGap.md(),
-            MemoryPanel(lead: lead),
-            const AppGap.md(),
-            _NextStepsPanel(
-              lead: lead,
-              onSchedule: () => ScheduleCallSheet.show(context, lead),
             ),
           ],
         ),
@@ -1310,8 +1319,17 @@ class LatestCallPanel extends StatelessWidget {
     return SectionPanel(
       title: 'Latest Call',
       icon: Icons.graphic_eq,
+      // Same violet "AI insight" treatment as Memory Bubble — both are
+      // AI-derived analysis of calls, as opposed to Call History's plain
+      // log, and should read as one visual family.
+      titleColor: AppColors.electricViolet,
+      color: AppColors.violetSurface,
+      borderColor: AppColors.violetBorder,
       trailing: call.score != null
-          ? Text('${call.score}/100', style: AppText.mono(size: 12))
+          ? Text(
+              '${call.score}/100',
+              style: AppText.mono(size: 12, color: AppColors.electricViolet),
+            )
           : null,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
